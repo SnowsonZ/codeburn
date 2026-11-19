@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, shell, type MenuItemConstructorOptions } from 'electron'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -11,6 +12,7 @@ import { getQuota, quotaService } from './quota'
 import { Telemetry } from './telemetry'
 import { autoUpdateSupported, createAutoUpdateChecker, releaseFeedOverride, type AutoUpdateChecker } from './auto-update'
 import { createCompanionUpdater, type CompanionUpdater, type CompanionUpdateStatus } from './companion-update'
+import { startWidgetSnapshots } from './widget-snapshot'
 import { createUpdateChecker, type UpdateChecker, type UpdateStatus } from './updates'
 
 // Initialized in bootstrap() once Electron paths exist; stays null under tests.
@@ -357,6 +359,10 @@ function bootstrap(): void {
     const servePidFile = path.join(app.getPath('userData'), 'serve.pid')
     reapOrphanServe(servePidFile)
     startServe(servePidFile)
+    const widget = path.join(process.resourcesPath, '..', 'PlugIns', 'CodeBurnWidgets.appex')
+    if (process.platform === 'darwin' && app.isPackaged && existsSync(widget)) {
+      app.once('will-quit', startWidgetSnapshots(app.getPath('home'), spawnCli, getQuota))
+    }
     // Consent-gated anonymous telemetry (desktop only). Nothing transmits until
     // the onboarding consent screen is completed and the toggle is on; EU/EEA/
     // UK/CH installs default the toggle off. Dev builds never send.
