@@ -47,10 +47,25 @@ private struct UsageSnapshot: Decodable {
 
     var total: Int? { sum(agents.map(\.tokens)) }
 
+    var rankedAgents: [UsageAgent] {
+        agents.filter { $0.tokens != 0 }.sorted { ($0.tokens ?? -1) > ($1.tokens ?? -1) }
+    }
+
     var cacheRate: Double? {
         guard let input = sum(agents.map(\.input)), input > 0,
               let cached = sum(agents.map(\.cached)), cached <= input else { return nil }
         return Double(cached) / Double(input)
+    }
+}
+
+private enum QuotaPeriod {
+    case fiveHours, weekly
+
+    var title: String {
+        switch self {
+        case .fiveHours: copy("5 小时", "5h")
+        case .weekly: copy("每周", "Week")
+        }
     }
 }
 
@@ -68,6 +83,21 @@ private struct QuotaWindow: Decodable {
         }
     }
 
+    var modelGroup: String {
+        if let separator = label.range(of: " · ") {
+            return String(label[..<separator.lowerBound])
+        }
+        return label
+    }
+
+    var modelPeriod: QuotaPeriod? {
+        guard let separator = label.range(of: " · ") else { return nil }
+        let bucket = label[separator.upperBound...].lowercased().replacingOccurrences(of: "-", with: " ")
+        if bucket.contains("five hour") || bucket.contains("5 hour") { return .fiveHours }
+        if bucket.contains("weekly") { return .weekly }
+        return nil
+    }
+
     func isActive(at date: Date) -> Bool {
         guard let reset = parseDate(resetsAt) else { return true }
         return reset > date
@@ -77,6 +107,45 @@ private struct QuotaWindow: Decodable {
 private struct QuotaAgent: Decodable {
     let id: Agent
     let windows: [QuotaWindow]
+}
+
+private struct ModelQuotaRow: Identifiable {
+    let id: String
+    let group: String
+    var fiveHours: QuotaWindow? = nil
+    var weekly: QuotaWindow? = nil
+    var standalone: QuotaWindow? = nil
+}
+
+private func shortModelGroup(_ name: String) -> String {
+    switch name.lowercased() {
+    case "claude and gpt models": "Claude / GPT"
+    case "gemini models": "Gemini"
+    default: name
+    }
+}
+
+private func modelQuotaRows(_ windows: [QuotaWindow]) -> [ModelQuotaRow] {
+    var rows: [ModelQuotaRow] = []
+    for window in windows {
+        let group = window.modelGroup
+        guard let period = window.modelPeriod else {
+            rows.append(.init(id: "other:" + window.label, group: group, standalone: window))
+            continue
+        }
+        let index: Int
+        if let existing = rows.firstIndex(where: { $0.group == group && $0.standalone == nil }) {
+            index = existing
+        } else {
+            index = rows.count
+            rows.append(.init(id: "group:" + group, group: group))
+        }
+        switch period {
+        case .fiveHours: rows[index].fiveHours = window
+        case .weekly: rows[index].weekly = window
+        }
+    }
+    return rows
 }
 
 private struct QuotaSnapshot: Decodable {
@@ -112,12 +181,22 @@ private struct Snapshot: Decodable {
             let day = Calendar.current.date(byAdding: .day, value: index - 6, to: now) ?? now
             return UsageDay(day: dayKey(day), tokens: tokens)
         }
-        let quotas = zip(Agent.allCases, [0.28, 0.61, 0.42]).map { id, percent in
-            QuotaAgent(id: id, windows: [
-                QuotaWindow(label: "5-hour", percent: percent, resetsAt: nil),
-                QuotaWindow(label: "Weekly", percent: percent / 2, resetsAt: nil)
-            ])
-        }
+        let quotas = [
+            QuotaAgent(id: .codex, windows: [
+                QuotaWindow(label: "Weekly", percent: 0.55, resetsAt: nil),
+            ]),
+            QuotaAgent(id: .zcode, windows: [
+                QuotaWindow(label: "Weekly", percent: 0.66, resetsAt: nil),
+                QuotaWindow(label: "5-hour", percent: 0.01, resetsAt: nil),
+            ]),
+            QuotaAgent(id: .antigravity, windows: [
+                QuotaWindow(label: "Claude and GPT models · Five Hour Limit Remaining", percent: 1, resetsAt: nil),
+                QuotaWindow(label: "Claude and GPT models · Weekly Limit Remaining", percent: 0.69, resetsAt: nil),
+                QuotaWindow(label: "Gemini 4 Argon · Gemini 4 Argon Weekly Limit Remaining", percent: 0.68, resetsAt: nil),
+                QuotaWindow(label: "Gemini Models · Five Hour Limit Remaining", percent: 0.24, resetsAt: nil),
+                QuotaWindow(label: "Gemini Models · Weekly Limit Remaining", percent: 0.25, resetsAt: nil),
+            ]),
+        ]
         return .init(version: 1, usage: .init(day: dayKey(now), updatedAt: updated, agents: agents, days: week),
                      quota: .init(updatedAt: updated, agents: quotas))
     }
@@ -218,7 +297,8 @@ private struct WidgetCard: View {
     @Environment(\.widgetFamily) private var family
     let card: Card
     let entry: Entry
-    private var wide: Bool { family == .systemMedium }
+    private var wide: Bool { family != .systemSmall }
+    private var large: Bool { family == .systemLarge }
     private let accent = Color(red: 0.98, green: 0.39, blue: 0.15)
 
     var body: some View {
@@ -307,7 +387,7 @@ private struct WidgetCard: View {
                     .accessibilityLabel(copy("缓存命中率", "Cache hit rate") + " " + percent(rate))
                 }
             }
-            ForEach(usage.agents, id: \.id) { row in
+            ForEach(usage.rankedAgents, id: \.id) { row in
                 HStack(spacing: 5) {
                     agentName(row.id)
                     Spacer(minLength: 2)
@@ -373,44 +453,127 @@ private struct WidgetCard: View {
         }
     }
 
+    @ViewBuilder
     private func quotas(_ quota: QuotaSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(quota.agents, id: \.id) { row in
-                let current = row.windows.filter { $0.isActive(at: entry.date) }
-                if wide {
-                    HStack(alignment: .center, spacing: 10) {
-                        agentName(row.id).frame(width: 78, alignment: .leading)
-                        quotaColumn(current.first, agent: row.id)
-                        quotaColumn(current.dropFirst().first, agent: row.id)
+        let providers = quota.agents.filter { $0.id != .antigravity }
+        let antigravity = quota.agents.first { $0.id == .antigravity }
+        if large {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 16) {
+                    ForEach(providers, id: \.id) { provider in
+                        accountQuota(provider).frame(maxWidth: .infinity, alignment: .leading)
                     }
-                } else {
-                    VStack(alignment: .leading, spacing: 3) {
+                }
+                Divider()
+                modelQuotaTable(antigravity, limit: 8)
+            }
+        } else if wide {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(providers, id: \.id, content: accountQuota)
+                }
+                .frame(width: 98, alignment: .leading)
+                modelQuotaTable(antigravity, limit: 3)
+                    .padding(.leading, 10)
+                    .overlay(alignment: .leading) { Rectangle().fill(Color.secondary.opacity(0.22)).frame(width: 1) }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(quota.agents, id: \.id) { row in
+                    let windows = activeWindows(row)
+                    let window = row.id == .antigravity ? windows.max { $0.percent < $1.percent } : windows.first
+                    VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 4) {
                             agentName(row.id)
                             Spacer(minLength: 0)
-                            quotaPercentage(current.first, agent: row.id, showName: true)
+                            if let window { quotaPercentage(window, agent: row.id, showName: row.id != .antigravity) }
                         }
-                        quotaBar(current.first, agent: row.id)
+                        .font(.system(size: 11.5, weight: .medium))
+                        if let window {
+                            if row.id == .antigravity {
+                                let model = shortModelGroup(window.modelGroup)
+                                Text(window.modelPeriod.map { model + " · " + $0.title } ?? model)
+                                    .font(.system(size: 9)).foregroundStyle(.secondary)
+                                    .lineLimit(1).minimumScaleFactor(0.8)
+                            }
+                            quotaBar(window, agent: row.id)
+                        }
                     }
                 }
             }
-            .font(.system(size: 11.5, weight: .medium))
         }
     }
 
-    private func quotaColumn(_ window: QuotaWindow?, agent: Agent) -> some View {
+    private func activeWindows(_ agent: QuotaAgent) -> [QuotaWindow] {
+        agent.windows.filter { $0.isActive(at: entry.date) }
+    }
+
+    private func accountQuota(_ row: QuotaAgent) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                if let window {
-                    Text(window.name).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
-                        .accessibilityHidden(true)
+            agentName(row.id).font(.system(size: 11.5, weight: .medium))
+            ForEach(activeWindows(row), id: \.label) { window in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text(window.name).foregroundStyle(.secondary).lineLimit(1)
+                            .accessibilityHidden(true)
+                        Spacer(minLength: 0)
+                        quotaPercentage(window, agent: row.id, showName: false)
+                    }
+                    quotaBar(window, agent: row.id)
                 }
-                Spacer(minLength: 0)
-                quotaPercentage(window, agent: agent, showName: false)
+                .font(.system(size: 10.5, weight: .medium))
             }
-            quotaBar(window, agent: agent)
         }
-        .frame(maxWidth: .infinity)
+    }
+
+    private func modelQuotaTable(_ row: QuotaAgent?, limit: Int) -> some View {
+        let rows = modelQuotaRows(row.map(activeWindows) ?? [])
+        let modelWidth: CGFloat = large ? 110 : 66
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                agentName(.antigravity).font(.system(size: 11.5, weight: .medium))
+                Spacer()
+                if rows.count > limit {
+                    let extra = rows.count - limit
+                    Text("+\(extra)").font(.system(size: 9)).foregroundStyle(.secondary)
+                        .accessibilityLabel(copy("另有 \(extra) 条额度", "\(extra) more quota rows"))
+                }
+            }
+            if rows.contains(where: { $0.standalone == nil }) {
+                HStack(spacing: 6) {
+                    Text(copy("模型组", "Model group")).frame(width: modelWidth, alignment: .leading)
+                    Text(QuotaPeriod.fiveHours.title).frame(maxWidth: .infinity, alignment: .trailing)
+                    Text(QuotaPeriod.weekly.title).frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+            ForEach(rows.prefix(limit)) { model in
+                HStack(spacing: 6) {
+                    Text(shortModelGroup(model.group))
+                        .lineLimit(1).minimumScaleFactor(0.78)
+                        .frame(width: modelWidth, alignment: .leading)
+                        .accessibilityLabel(model.group)
+                    if let window = model.standalone {
+                        modelQuotaCell(window)
+                    } else {
+                        modelQuotaCell(model.fiveHours)
+                        modelQuotaCell(model.weekly)
+                    }
+                }
+                .font(.system(size: large ? 12 : 10, weight: .medium))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func modelQuotaCell(_ window: QuotaWindow?) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            if let window {
+                quotaPercentage(window, agent: .antigravity, showName: false)
+                quotaBar(window, agent: .antigravity, height: 3)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     @ViewBuilder
@@ -439,17 +602,17 @@ private struct WidgetCard: View {
         }
     }
 
-    private func quotaBar(_ window: QuotaWindow?, agent: Agent) -> some View {
+    private func quotaBar(_ window: QuotaWindow, agent: Agent, height: CGFloat = 4) -> some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.secondary.opacity(0.20))
-                if let window, window.percent > 0 {
+                if window.percent > 0 {
                     Capsule().fill(window.percent >= 0.9 ? Color.red : agent.color)
                         .frame(width: geometry.size.width * min(1, window.percent))
                 }
             }
         }
-        .frame(height: 4)
+        .frame(height: height)
         .accessibilityHidden(true)
     }
 
@@ -462,7 +625,7 @@ private func configuration(for card: Card) -> some WidgetConfiguration {
     }
     .configurationDisplayName(card.title)
     .description(card.description)
-    .supportedFamilies([.systemSmall, .systemMedium])
+    .supportedFamilies(card == .quota ? [.systemSmall, .systemMedium, .systemLarge] : [.systemSmall, .systemMedium])
 }
 
 private struct TodayWidget: Widget {

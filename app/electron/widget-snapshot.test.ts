@@ -48,6 +48,21 @@ describe('desktop widget usage snapshot', () => {
 })
 
 describe('desktop widget quota snapshot', () => {
+  it('retains the complete five-hour and weekly buckets for each Antigravity model group', () => {
+    const windows = [
+      { label: 'Claude and GPT models · Five Hour Limit Remaining', percent: 1, resetsAt: null },
+      { label: 'Claude and GPT models · Weekly Limit Remaining', percent: 0.69, resetsAt: null },
+      { label: 'Gemini 4 Argon · Gemini 4 Argon Weekly Limit Remaining', percent: 0.68, resetsAt: null },
+      { label: 'Gemini Models · Five Hour Limit Remaining', percent: 0.24, resetsAt: null },
+      { label: 'Gemini Models · Weekly Limit Remaining', percent: 0.25, resetsAt: null },
+    ]
+    const row: QuotaProvider = {
+      provider: 'antigravity', connection: 'connected', primary: windows[0]!,
+      details: windows, planLabel: null, footerLines: [],
+    }
+    expect(makeWidgetQuota([row], now).agents.find(agent => agent.id === 'antigravity')?.windows).toEqual(windows)
+  })
+
   it('includes published windows only for the three agents and retains reset time', () => {
     const weekly = { label: 'Weekly', percent: 0.45, resetsAt: '2026-11-22T00:00:00Z' }
     const session = { label: '5-hour', percent: 0.76, resetsAt: null }

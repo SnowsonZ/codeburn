@@ -93,8 +93,9 @@ export function makeWidgetQuota(rows: readonly QuotaProvider[], now: Date): Widg
       return {
         id,
         windows: [...unique.values()].filter(window => Number.isFinite(window.percent) && window.percent >= 0 && window.percent <= 1)
-          .slice(0, 2)
-          .map(window => ({ label: window.label.slice(0, 42), percent: window.percent, resetsAt: window.resetsAt })),
+          // Model groups use the full bucket label to pair their time windows.
+          .slice(0, id === 'antigravity' ? 24 : 2)
+          .map(window => ({ label: window.label.slice(0, 120), percent: window.percent, resetsAt: window.resetsAt })),
       }
     }),
   }
