@@ -5,21 +5,21 @@
     <key>CFBundleDisplayName</key>
     <string>CodeBurn</string>
     <key>CFBundleExecutable</key>
-    <string>CodeBurnWidgets</string>
+    <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
-    <string>local.codeburn.bigmodel.widgets</string>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleName</key>
     <string>CodeBurnWidgets</string>
     <key>CFBundlePackageType</key>
     <string>XPC!</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>CFBundleSupportedPlatforms</key>
     <array><string>MacOSX</string></array>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>$(MACOSX_DEPLOYMENT_TARGET)</string>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionPointIdentifier</key>

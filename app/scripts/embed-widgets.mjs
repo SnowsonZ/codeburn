@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -11,35 +11,36 @@ const hostInfo = path.join(application, 'Contents', 'Info.plist')
 const pluginDir = path.join(application, 'Contents', 'PlugIns')
 const name = 'CodeBurnWidgets'
 const temp = mkdtempSync(path.join(tmpdir(), 'codeburn-widget-'))
-const extension = path.join(temp, name + '.appex')
-const info = path.join(extension, 'Contents', 'Info.plist')
-const binary = path.join(extension, 'Contents', 'MacOS', name)
+const extension = path.join(temp, 'Build', 'Products', 'Release', name + '.appex')
+const destination = path.join(pluginDir, name + '.appex')
 
 function run(file, args) {
   execFileSync(file, args, { stdio: 'inherit' })
 }
 
-try {
-  mkdirSync(path.dirname(binary), { recursive: true })
-  copyFileSync(path.join(sources, 'Info.plist'), info)
-  for (const key of ['CFBundleShortVersionString', 'CFBundleVersion']) {
-    const value = execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print ' + key, hostInfo], { encoding: 'utf8' }).trim()
-    run('/usr/bin/plutil', ['-replace', key, '-string', value, info])
-  }
+function plist(file, key) {
+  return execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print ' + key, file], { encoding: 'utf8' }).trim()
+}
 
-  const sdk = execFileSync('xcrun', ['--sdk', 'macosx', '--show-sdk-path'], { encoding: 'utf8' }).trim()
-  run('xcrun', [
-    'swiftc', '-parse-as-library', '-application-extension', '-target', 'arm64-apple-macosx14.0',
-    '-sdk', sdk, '-module-cache-path', path.join(temp, 'swift-cache'), '-O',
-    '-framework', 'SwiftUI', '-framework', 'WidgetKit',
-    path.join(sources, name + '.swift'), '-o', binary,
+try {
+  const marketingVersion = plist(hostInfo, 'CFBundleShortVersionString')
+  // The manually packaged preview used the marketing version as its native
+  // build number. A higher build supersedes its cached widget descriptors.
+  const buildVersion = '1'
+  run('xcodebuild', [
+    '-project', path.join(sources, name + '.xcodeproj'), '-scheme', name,
+    '-configuration', 'Release', '-destination', 'generic/platform=macOS',
+    '-derivedDataPath', temp, '-quiet', 'ARCHS=arm64', 'ONLY_ACTIVE_ARCH=NO',
+    'CODE_SIGNING_ALLOWED=NO', 'MARKETING_VERSION=' + marketingVersion,
+    'CURRENT_PROJECT_VERSION=' + buildVersion, 'build',
   ])
   run('/usr/bin/codesign', ['--sign', '-', '--timestamp=none', '--entitlements', path.join(sources, 'Widget.entitlements'), extension])
   mkdirSync(pluginDir, { recursive: true })
-  cpSync(extension, path.join(pluginDir, name + '.appex'), { recursive: true })
+  rmSync(destination, { recursive: true, force: true })
+  cpSync(extension, destination, { recursive: true })
+  run('/usr/bin/plutil', ['-replace', 'CFBundleVersion', '-string', buildVersion, hostInfo])
 
-  // The CLI and Electron helpers are already signed. Seal the new nested
-  // extension in the outer bundle without re-signing subordinate executables.
+  // Seal the new nested extension without re-signing Electron's helpers.
   run('/usr/bin/codesign', [
     '--force', '--sign', '-', '--timestamp=none', '--entitlements',
     path.join(appDir, 'build', 'entitlements.mac.plist'), application,

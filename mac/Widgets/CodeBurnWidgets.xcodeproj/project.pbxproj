@@ -1,0 +1,104 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+		AB1000000000000000000001 /* CodeBurnWidgets.swift in Sources */ = {
+			isa = PBXBuildFile;
+			fileRef = AB1000000000000000000002 /* CodeBurnWidgets.swift */;
+		};
+		AB1000000000000000000002 /* CodeBurnWidgets.swift */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			path = CodeBurnWidgets.swift;
+			sourceTree = "<group>";
+		};
+		AB1000000000000000000003 /* CodeBurnWidgets.appex */ = {
+			isa = PBXFileReference;
+			explicitFileType = "wrapper.app-extension";
+			includeInIndex = 0;
+			path = CodeBurnWidgets.appex;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		AB1000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (AB1000000000000000000001);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AB1000000000000000000005 = {
+			isa = PBXGroup;
+			children = (AB1000000000000000000002, AB1000000000000000000006);
+			sourceTree = "<group>";
+		};
+		AB1000000000000000000006 /* Products */ = {
+			isa = PBXGroup;
+			children = (AB1000000000000000000003);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		AB1000000000000000000007 /* CodeBurnWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AB100000000000000000000A;
+			buildPhases = (AB1000000000000000000004);
+			buildRules = ();
+			dependencies = ();
+			name = CodeBurnWidgets;
+			productName = CodeBurnWidgets;
+			productReference = AB1000000000000000000003;
+			productType = "com.apple.product-type.app-extension";
+		};
+		AB1000000000000000000008 /* Project object */ = {
+			isa = PBXProject;
+			attributes = { BuildIndependentTargetsInParallel = YES; };
+			buildConfigurationList = AB1000000000000000000009;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = AB1000000000000000000005;
+			productRefGroup = AB1000000000000000000006;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (AB1000000000000000000007);
+		};
+		AB1000000000000000000009 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (AB100000000000000000000B);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AB100000000000000000000A = {
+			isa = XCConfigurationList;
+			buildConfigurations = (AB100000000000000000000C);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AB100000000000000000000B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = { SDKROOT = macosx; };
+			name = Release;
+		};
+		AB100000000000000000000C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Widget.entitlements;
+				CODE_SIGNING_ALLOWED = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.9.28;
+				PRODUCT_BUNDLE_IDENTIFIER = local.codeburn.bigmodel.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_APP_INTENTS_METADATA = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+	};
+	rootObject = AB1000000000000000000008;
+}
