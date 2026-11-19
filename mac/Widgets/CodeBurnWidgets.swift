@@ -306,8 +306,10 @@ private struct WidgetCard: View {
     private let accent = Color(red: 0.98, green: 0.39, blue: 0.15)
     private let remainingColor = Color(red: 0.31, green: 0.75, blue: 0.49)
     private let usedColor = Color.gray.opacity(0.66)
-    private var quotaLabelWidth: CGFloat { large ? 61 : 49 }
     private var quotaIconSize: CGFloat { large ? 18 : (wide ? 13 : 15) }
+    private let quotaIconGap: CGFloat = 4
+    private var quotaIdentityWidth: CGFloat { quotaIconSize * 2 + quotaIconGap + 8 }
+    private var quotaRowHeight: CGFloat { large ? 26 : 13 }
 
 
     var body: some View {
@@ -514,33 +516,34 @@ private struct WidgetCard: View {
         let limit = large ? 8 : 3
         return Grid(alignment: .leading, horizontalSpacing: large ? 14 : 8, verticalSpacing: large ? 10 : 2) {
             GridRow {
-                Color.clear.frame(width: quotaLabelWidth, height: 1).accessibilityHidden(true)
+                Color.clear.frame(width: quotaIdentityWidth, height: 1).accessibilityHidden(true)
                 periodLabel(.fiveHours).frame(maxWidth: .infinity, alignment: .trailing)
                 periodLabel(.weekly).frame(maxWidth: .infinity, alignment: .trailing)
             }
             ForEach(accounts, id: \.id, content: accountQuotaRows)
             if !models.isEmpty {
-                HStack(spacing: 8) {
-                    harnessIcon(.antigravity)
-                    Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 1)
-                        .accessibilityHidden(true)
-                    if models.count > limit {
-                        let extra = models.count - limit
-                        Text("+\(extra)").font(.system(size: 9))
-                            .accessibilityLabel(copy("另有 \(extra) 条额度", "\(extra) more quota rows"))
+                GridRow(alignment: .center) {
+                    quotaIconCell(harnessIcon(.antigravity))
+                    HStack(spacing: 8) {
+                        Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 1)
+                            .accessibilityHidden(true)
+                        if models.count > limit {
+                            let extra = models.count - limit
+                            Text("+\(extra)").font(.system(size: 9)).foregroundStyle(.secondary)
+                                .accessibilityLabel(copy("另有 \(extra) 条额度", "\(extra) more quota rows"))
+                        }
                     }
+                    .gridCellColumns(2)
                 }
-                .foregroundStyle(.secondary)
-                .gridCellColumns(3)
                 ForEach(models.prefix(limit)) { model in
                     if let standalone = model.standalone {
                         GridRow {
-                            quotaIconCell(modelIcon(model.group), nested: true)
+                            quotaIconCell(modelIcon(model.group))
                             quotaCell(standalone).gridCellColumns(2)
                         }
                     } else {
                         GridRow {
-                            quotaIconCell(modelIcon(model.group), nested: true)
+                            quotaIconCell(modelIcon(model.group))
                             quotaCell(model.fiveHours, period: .fiveHours)
                             quotaCell(model.weekly, period: .weekly)
                         }
@@ -575,9 +578,8 @@ private struct WidgetCard: View {
         }
     }
 
-    private func quotaIconCell<Icon: View>(_ icon: Icon, nested: Bool = false) -> some View {
-        icon.padding(.leading, nested ? 8 : 0)
-            .frame(width: quotaLabelWidth, alignment: .leading)
+    private func quotaIconCell<Icon: View>(_ icon: Icon) -> some View {
+        icon.frame(width: quotaIdentityWidth, height: quotaRowHeight, alignment: .leading)
     }
 
     private func periodLabel(_ period: QuotaPeriod) -> some View {
@@ -597,21 +599,33 @@ private struct WidgetCard: View {
         let claude = name.contains("claude")
         let gpt = name.contains("gpt")
         let gemini = name.contains("gemini")
-        return HStack(spacing: 3) {
-            if claude { quotaLogo("provider-claude", fallback: "sun.max") }
-            if gpt { quotaLogo("provider-codex", fallback: "circle.hexagongrid") }
-            if gemini {
-                quotaLogo("provider-gemini", fallback: "sparkle")
-                if name.contains("argon") {
-                    Text("Ar")
-                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                        .padding(.horizontal, 2).padding(.vertical, 1)
-                        .background(Color.secondary.opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+        return HStack(spacing: quotaIconGap) {
+            Group {
+                if claude {
+                    quotaLogo("provider-claude", fallback: "sun.max")
+                } else if gpt {
+                    quotaLogo("provider-codex", fallback: "circle.hexagongrid")
+                } else if gemini {
+                    quotaLogo("provider-gemini", fallback: "sparkle")
+                } else {
+                    Image(systemName: "cpu").font(.system(size: quotaIconSize))
                 }
             }
-            if !claude && !gpt && !gemini {
-                Image(systemName: "cpu").font(.system(size: quotaIconSize))
+            .frame(width: quotaIconSize, height: quotaIconSize)
+            Group {
+                if claude && gpt {
+                    quotaLogo("provider-codex", fallback: "circle.hexagongrid")
+                } else if gemini && name.contains("argon") {
+                    Text("Ar")
+                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                        .fixedSize()
+                        .padding(.horizontal, large ? 2 : 1).padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+                } else {
+                    Color.clear
+                }
             }
+            .frame(width: quotaIconSize, height: quotaIconSize)
         }
         .foregroundStyle(.secondary)
         .accessibilityElement(children: .ignore)
@@ -625,6 +639,7 @@ private struct WidgetCard: View {
            let image = NSImage(contentsOf: url) {
             Image(nsImage: image).renderingMode(.template).resizable().scaledToFit()
                 .frame(width: quotaIconSize, height: quotaIconSize)
+                .scaleEffect(name == "provider-zcode" ? 1.3 : 1)
                 .foregroundStyle(.primary)
         } else {
             Image(systemName: fallback).font(.system(size: quotaIconSize))
@@ -647,11 +662,11 @@ private struct WidgetCard: View {
                 remainingValue(window).frame(width: large ? 39 : 29, alignment: .trailing)
             }
             .font(.system(size: large ? 13 : 10.5, weight: .medium))
-            .frame(minHeight: large ? 25 : 12)
+            .frame(height: quotaRowHeight)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel((period?.title ?? window.name) + " " + copy("剩余", "Remaining") + " " + percent(window.remaining))
         } else {
-            Color.clear.frame(height: large ? 25 : 12)
+            Color.clear.frame(height: quotaRowHeight)
                 .gridCellUnsizedAxes(.horizontal)
                 .accessibilityHidden(true)
         }
