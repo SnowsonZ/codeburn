@@ -19,3 +19,19 @@ npm --prefix app run package:bigmodel
 ```
 
 [BigModel 配额接口说明](https://github.com/zai-org/ZCode/blob/fec975905a2abd4c07e35c40d51fa097a2258ec9/docs/bigmodel-coding-plan-usage-quota.md)
+
+## macOS 桌面小组件
+
+使用带小组件的本地构建，并先打开应用。随后在 macOS 桌面右键选择 **编辑小组件**，搜索 **CodeBurn**。可添加 **今日用量**、**7 天趋势** 和 **套餐额度**，每种都有小号和中号。
+
+- 今日用量显示 Codex、ZCode、Antigravity 的 Token 数和缓存命中率。同一 Agent 的桌面与 CLI 用量合计。
+- 7 天趋势按本机自然日汇总三款 Agent。缓存读取和写入的输入 Token 各计一次。
+- 套餐额度显示 CodeBurn 已连接账户的用量窗口。首次添加后需要等应用写入快照，之后由 macOS 安排实际刷新时间。CodeBurn 关闭时，小组件显示最近同步的结果。
+
+小组件只从自己的沙盒读取本地数字快照。macOS 需要 14 或更新版本，以下命令需要装有 Xcode：
+
+```sh
+npm --prefix app run package:widgets
+```
+
+产物为 `app/release-widgets/mac-arm64/CodeBurn BigModel.app`。

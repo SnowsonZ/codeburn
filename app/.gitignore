@@ -5,3 +5,4 @@ build/cli/
 build/menubar/
 *.log
 .vite/
+/release-widgets/
