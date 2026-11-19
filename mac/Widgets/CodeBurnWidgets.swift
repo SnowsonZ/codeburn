@@ -67,6 +67,8 @@ private enum QuotaPeriod {
         case .weekly: copy("每周", "Week")
         }
     }
+
+    var symbol: String { self == .fiveHours ? "clock" : "calendar" }
 }
 
 private struct QuotaWindow: Decodable {
@@ -80,6 +82,16 @@ private struct QuotaWindow: Decodable {
         case "Weekly": copy("每周", "Week")
         case "Session": copy("会话", "Session")
         default: label
+        }
+    }
+
+    var remaining: Double { min(1, max(0, 1 - percent)) }
+
+    var accountPeriod: QuotaPeriod? {
+        switch label {
+        case "5-hour": .fiveHours
+        case "Weekly": .weekly
+        default: nil
         }
     }
 
@@ -253,7 +265,7 @@ private enum Card: String {
         switch self {
         case .today: copy("三款 Agent 的 Token 和缓存命中率。", "Tokens and cache hits for your three agents.")
         case .trend: copy("最近 7 天的 Token 消耗。", "Token usage over the last seven days.")
-        case .quota: copy("各 Agent 的套餐窗口及已用比例。", "Used percentage for each agent’s plan windows.")
+        case .quota: copy("各 Agent 的套餐窗口及剩余比例。", "Remaining percentage for each agent’s plan windows.")
         }
     }
 
@@ -300,18 +312,25 @@ private struct WidgetCard: View {
     private var wide: Bool { family != .systemSmall }
     private var large: Bool { family == .systemLarge }
     private let accent = Color(red: 0.98, green: 0.39, blue: 0.15)
+    private let remainingColor = Color(red: 0.31, green: 0.75, blue: 0.49)
+    private let usedColor = Color.gray.opacity(0.66)
+    private var quotaLabelWidth: CGFloat { large ? 108 : 90 }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Label(card.title, systemImage: card.symbol)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .widgetAccentable()
+                    .foregroundStyle(card == .quota ? Color.primary : accent)
+                    .widgetAccentable(card != .quota)
                 if card == .quota {
                     Spacer()
-                    Text(copy("已用", "Used"))
-                        .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Circle().fill(remainingColor).frame(width: 5, height: 5).accessibilityHidden(true)
+                        Text(copy("剩余", "Remaining"))
+                    }
+                    .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                 }
             }
             switch card {
@@ -343,7 +362,12 @@ private struct WidgetCard: View {
         let raw = card == .quota ? entry.snapshot?.quota?.updatedAt : entry.snapshot?.usage?.updatedAt
         let updated = parseDate(raw)
         return HStack(spacing: 4) {
-            Text(copy("上次刷新", "Updated"))
+            if card == .quota {
+                Image(systemName: "arrow.clockwise")
+                    .accessibilityLabel(copy("上次刷新", "Updated"))
+            } else {
+                Text(copy("上次刷新", "Updated"))
+            }
             if let updated {
                 if civilCalendar.isDate(updated, inSameDayAs: entry.date) {
                     Text(updated, style: .time)
@@ -455,49 +479,39 @@ private struct WidgetCard: View {
 
     @ViewBuilder
     private func quotas(_ quota: QuotaSnapshot) -> some View {
-        let providers = quota.agents.filter { $0.id != .antigravity }
-        let antigravity = quota.agents.first { $0.id == .antigravity }
-        if large {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 16) {
-                    ForEach(providers, id: \.id) { provider in
-                        accountQuota(provider).frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                Divider()
-                modelQuotaTable(antigravity, limit: 8)
-            }
-        } else if wide {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 7) {
-                    ForEach(providers, id: \.id, content: accountQuota)
-                }
-                .frame(width: 98, alignment: .leading)
-                modelQuotaTable(antigravity, limit: 3)
-                    .padding(.leading, 10)
-                    .overlay(alignment: .leading) { Rectangle().fill(Color.secondary.opacity(0.22)).frame(width: 1) }
-            }
+        if wide {
+            quotaTable(quota)
         } else {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 ForEach(quota.agents, id: \.id) { row in
                     let windows = activeWindows(row)
-                    let window = row.id == .antigravity ? windows.max { $0.percent < $1.percent } : windows.first
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 4) {
-                            agentName(row.id)
-                            Spacer(minLength: 0)
-                            if let window { quotaPercentage(window, agent: row.id, showName: row.id != .antigravity) }
-                        }
-                        .font(.system(size: 11.5, weight: .medium))
-                        if let window {
-                            if row.id == .antigravity {
-                                let model = shortModelGroup(window.modelGroup)
-                                Text(window.modelPeriod.map { model + " · " + $0.title } ?? model)
-                                    .font(.system(size: 9)).foregroundStyle(.secondary)
-                                    .lineLimit(1).minimumScaleFactor(0.8)
+                    let window = row.id == .antigravity ? windows.min { $0.remaining < $1.remaining } : windows.first
+                    if let window {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 4) {
+                                Text(row.id.name).lineLimit(1).layoutPriority(1)
+                                Spacer(minLength: 0)
+                                if row.id != .antigravity {
+                                    if let period = window.accountPeriod {
+                                        periodIcon(period)
+                                    } else {
+                                        Text(window.name).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }
+                                remainingValue(window)
                             }
-                            quotaBar(window, agent: row.id)
+                            .font(.system(size: 11.5, weight: .medium))
+                            if row.id == .antigravity {
+                                HStack(spacing: 3) {
+                                    if let period = window.modelPeriod { periodIcon(period) }
+                                    Text(shortModelGroup(window.modelGroup))
+                                        .font(.system(size: 9)).foregroundStyle(.secondary)
+                                        .lineLimit(1).minimumScaleFactor(0.8)
+                                }
+                            }
+                            quotaBar(window)
                         }
+                        .accessibilityElement(children: .combine)
                     }
                 }
             }
@@ -508,109 +522,124 @@ private struct WidgetCard: View {
         agent.windows.filter { $0.isActive(at: entry.date) }
     }
 
-    private func accountQuota(_ row: QuotaAgent) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            agentName(row.id).font(.system(size: 11.5, weight: .medium))
-            ForEach(activeWindows(row), id: \.label) { window in
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 4) {
-                        Text(window.name).foregroundStyle(.secondary).lineLimit(1)
-                            .accessibilityHidden(true)
-                        Spacer(minLength: 0)
-                        quotaPercentage(window, agent: row.id, showName: false)
+    private func quotaTable(_ quota: QuotaSnapshot) -> some View {
+        let accounts = quota.agents.filter { $0.id != .antigravity }
+        let antigravity = quota.agents.first { $0.id == .antigravity }
+        let models = modelQuotaRows(antigravity.map(activeWindows) ?? [])
+        let limit = large ? 8 : 3
+        return Grid(alignment: .leading, horizontalSpacing: large ? 14 : 8, verticalSpacing: large ? 10 : 3) {
+            GridRow {
+                Color.clear.frame(width: quotaLabelWidth, height: 1).accessibilityHidden(true)
+                periodIcon(.fiveHours).frame(maxWidth: .infinity, alignment: .trailing)
+                periodIcon(.weekly).frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            ForEach(accounts, id: \.id, content: accountQuotaRows)
+            if !models.isEmpty {
+                Divider().gridCellUnsizedAxes(.horizontal)
+                HStack {
+                    Text("Antigravity").font(.system(size: large ? 12 : 10, weight: .semibold))
+                    Spacer()
+                    if models.count > limit {
+                        let extra = models.count - limit
+                        Text("+\(extra)").font(.system(size: 9))
+                            .accessibilityLabel(copy("另有 \(extra) 条额度", "\(extra) more quota rows"))
                     }
-                    quotaBar(window, agent: row.id)
                 }
-                .font(.system(size: 10.5, weight: .medium))
-            }
-        }
-    }
-
-    private func modelQuotaTable(_ row: QuotaAgent?, limit: Int) -> some View {
-        let rows = modelQuotaRows(row.map(activeWindows) ?? [])
-        let modelWidth: CGFloat = large ? 110 : 66
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                agentName(.antigravity).font(.system(size: 11.5, weight: .medium))
-                Spacer()
-                if rows.count > limit {
-                    let extra = rows.count - limit
-                    Text("+\(extra)").font(.system(size: 9)).foregroundStyle(.secondary)
-                        .accessibilityLabel(copy("另有 \(extra) 条额度", "\(extra) more quota rows"))
-                }
-            }
-            if rows.contains(where: { $0.standalone == nil }) {
-                HStack(spacing: 6) {
-                    Text(copy("模型组", "Model group")).frame(width: modelWidth, alignment: .leading)
-                    Text(QuotaPeriod.fiveHours.title).frame(maxWidth: .infinity, alignment: .trailing)
-                    Text(QuotaPeriod.weekly.title).frame(maxWidth: .infinity, alignment: .trailing)
-                }
-                .font(.system(size: 9)).foregroundStyle(.secondary)
-            }
-            ForEach(rows.prefix(limit)) { model in
-                HStack(spacing: 6) {
-                    Text(shortModelGroup(model.group))
-                        .lineLimit(1).minimumScaleFactor(0.78)
-                        .frame(width: modelWidth, alignment: .leading)
-                        .accessibilityLabel(model.group)
-                    if let window = model.standalone {
-                        modelQuotaCell(window)
+                .foregroundStyle(.secondary)
+                .gridCellColumns(3)
+                ForEach(models.prefix(limit)) { model in
+                    if let standalone = model.standalone {
+                        GridRow {
+                            quotaRowLabel(shortModelGroup(model.group), nested: true).accessibilityLabel(model.group)
+                            quotaCell(standalone).gridCellColumns(2)
+                        }
                     } else {
-                        modelQuotaCell(model.fiveHours)
-                        modelQuotaCell(model.weekly)
+                        GridRow {
+                            quotaRowLabel(shortModelGroup(model.group), nested: true).accessibilityLabel(model.group)
+                            quotaCell(model.fiveHours, period: .fiveHours)
+                            quotaCell(model.weekly, period: .weekly)
+                        }
                     }
                 }
-                .font(.system(size: large ? 12 : 10, weight: .medium))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func modelQuotaCell(_ window: QuotaWindow?) -> some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            if let window {
-                quotaPercentage(window, agent: .antigravity, showName: false)
-                quotaBar(window, agent: .antigravity, height: 3)
+    @ViewBuilder
+    private func accountQuotaRows(_ account: QuotaAgent) -> some View {
+        let windows = activeWindows(account)
+        let fiveHours = windows.first { $0.accountPeriod == .fiveHours }
+        let weekly = windows.first { $0.accountPeriod == .weekly }
+        if fiveHours != nil || weekly != nil {
+            GridRow {
+                quotaRowLabel(account.id.name)
+                quotaCell(fiveHours, period: .fiveHours)
+                quotaCell(weekly, period: .weekly)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        ForEach(windows.filter { $0.accountPeriod == nil }, id: \.label) { window in
+            GridRow {
+                quotaRowLabel(account.id.name)
+                HStack(spacing: 5) {
+                    Text(window.name).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                    quotaCell(window)
+                }
+                .gridCellColumns(2)
+            }
+        }
+    }
+
+    private func quotaRowLabel(_ name: String, nested: Bool = false) -> some View {
+        Text(name)
+            .font(.system(size: large ? 13 : 11, weight: nested ? .regular : .semibold))
+            .lineLimit(1).minimumScaleFactor(0.8)
+            .padding(.leading, nested ? 8 : 0)
+            .frame(width: quotaLabelWidth, alignment: .leading)
+    }
+
+    private func periodIcon(_ period: QuotaPeriod) -> some View {
+        Image(systemName: period.symbol)
+            .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+            .accessibilityLabel(period.title)
+            .help(period.title)
+    }
+
+    private func remainingValue(_ window: QuotaWindow) -> some View {
+        let rate = percent(window.remaining)
+        return Text(rate)
+            .monospacedDigit().lineLimit(1).fixedSize()
+            .accessibilityLabel(copy("剩余", "Remaining") + " " + rate)
     }
 
     @ViewBuilder
-    private func quotaPercentage(_ window: QuotaWindow?, agent: Agent, showName: Bool) -> some View {
+    private func quotaCell(_ window: QuotaWindow?, period: QuotaPeriod? = nil) -> some View {
         if let window {
-            let rate = percent(window.percent)
-            let value = Text(rate)
-                .monospacedDigit()
-                .foregroundStyle(window.percent >= 0.9 ? Color.red : Color.primary)
-                .fixedSize()
-            ViewThatFits(in: .horizontal) {
-                if showName && window.name.count <= 8 {
-                    HStack(spacing: 3) {
-                        Text(window.name).font(.system(size: 10)).foregroundStyle(.secondary)
-                        value
-                    }
-                    .fixedSize()
-                }
-                value
+            HStack(spacing: 5) {
+                quotaBar(window, height: large ? 6 : 4)
+                remainingValue(window).frame(width: large ? 39 : 29, alignment: .trailing)
             }
+            .font(.system(size: large ? 13 : 10.5, weight: .medium))
+            .frame(minHeight: large ? 25 : 12)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(agent.name + " " + window.name + " " + copy("已用", "used") + " " + rate)
+            .accessibilityLabel((period?.title ?? window.name) + " " + copy("剩余", "Remaining") + " " + percent(window.remaining))
         } else {
-            Text("—").foregroundStyle(.secondary)
-                .accessibilityLabel(copy("暂无额度", "Quota unavailable"))
+            Color.clear.frame(height: large ? 25 : 12)
+                .gridCellUnsizedAxes(.horizontal)
+                .accessibilityHidden(true)
         }
     }
 
-    private func quotaBar(_ window: QuotaWindow, agent: Agent, height: CGFloat = 4) -> some View {
+    private func quotaBar(_ window: QuotaWindow, height: CGFloat = 4) -> some View {
         GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.secondary.opacity(0.20))
-                if window.percent > 0 {
-                    Capsule().fill(window.percent >= 0.9 ? Color.red : agent.color)
-                        .frame(width: geometry.size.width * min(1, window.percent))
+            ZStack(alignment: .trailing) {
+                Capsule().fill(usedColor)
+                if window.remaining > 0 {
+                    Rectangle().fill(remainingColor)
+                        .frame(width: geometry.size.width * window.remaining)
                 }
             }
+            .clipShape(Capsule())
         }
         .frame(height: height)
         .accessibilityHidden(true)
