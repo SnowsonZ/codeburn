@@ -26,7 +26,7 @@ npm --prefix app run package:bigmodel
 
 - 今日用量显示 Codex、ZCode、Antigravity 的 Token 数和缓存命中率。同一 Agent 的桌面与 CLI 用量合计。
 - 7 天趋势按本机自然日汇总三款 Agent。缓存读取和写入的输入 Token 各计一次。
-- 套餐额度显示 CodeBurn 已连接账户的用量窗口。首次添加后需要等应用写入快照，之后由 macOS 安排实际刷新时间。CodeBurn 关闭时，小组件显示最近同步的结果。
+- 套餐额度显示 CodeBurn 已连接账户的用量窗口。首次添加后需要等应用写入快照，之后由 macOS 安排实际刷新时间。CodeBurn 关闭后停止写入新快照。跨日后，今日用量和趋势等待下一次同步。
 
 小组件只从自己的沙盒读取本地数字快照。macOS 需要 14 或更新版本，以下命令需要装有 Xcode：
 
