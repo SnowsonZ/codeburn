@@ -21,6 +21,8 @@ import { quotaRequestSignal, sanitizeError } from './security'
 import type { QuotaProvider, QuotaWindow } from './types'
 
 const USAGE_ENDPOINT = 'https://api.z.ai/api/monitor/usage/quota/limit'
+const BIGMODEL_USAGE_ENDPOINT = 'https://open.bigmodel.cn/api/monitor/usage/quota/limit'
+const BIGMODEL_SOURCE = 'Source: BigModel Coding Plan'
 const STORAGE_KEY = 'oauth:zai:access_token'
 const SOURCE_FOOTER = ['Source: Z.ai Coding Plan']
 const EXPIRED_FOOTER = ['Login expired. Open the ZCode app and sign in again, then refresh.']
@@ -254,40 +256,50 @@ export function decodeZcodeUsage(body: unknown): ZcodeDecoded {
 
 export type ZcodeResult = { quota: QuotaProvider; retryAfterSeconds?: number }
 
-export async function fetchZcodeQuota(options: Partial<ZcodeDeps> & { signal?: AbortSignal } = {}): Promise<ZcodeResult> {
+export async function fetchZcodeQuota(options: Partial<ZcodeDeps> & {
+  signal?: AbortSignal
+  readBigModelApiKey?: () => Promise<string | null>
+} = {}): Promise<ZcodeResult> {
   const deps = { ...defaultDeps(), ...options }
+  let isBigModel = false
   try {
-    const token = await zcodeAccessToken(deps)
+    const bigModelKey = await options.readBigModelApiKey?.() ?? nonEmpty(deps.env['BIGMODEL_USAGE_API_KEY'])
+    isBigModel = Boolean(bigModelKey)
+    const rejectedFooter = isBigModel ? ['BigModel rejected the Coding Plan API key.'] : EXPIRED_FOOTER
+    const token = bigModelKey ?? await zcodeAccessToken(deps)
     if (token === null) return { quota: empty('disconnected') }
     if (token === '') return { quota: empty('terminalFailure', EXPIRED_FOOTER) }
 
-    const response = await deps.fetch(USAGE_ENDPOINT, {
+    const response = await deps.fetch(isBigModel ? BIGMODEL_USAGE_ENDPOINT : USAGE_ENDPOINT, {
       method: 'GET', signal: quotaRequestSignal(options.signal),
+      ...(isBigModel ? { redirect: 'error' as const } : {}),
       headers: {
         Accept: 'application/json',
         'Accept-Language': 'en-US,en',
-        Authorization: `Bearer ${token}`,
+        Authorization: isBigModel ? token : `Bearer ${token}`,
         'User-Agent': 'CodeBurn',
       },
     })
-    // Only the ZCode app can mint a new login, so a rejected token is terminal.
-    if (response.status === 401 || response.status === 403) return { quota: empty('terminalFailure', EXPIRED_FOOTER) }
+    if (response.status === 401 || response.status === 403) return { quota: empty('terminalFailure', rejectedFooter) }
     if (response.status === 429) {
       const raw = response.headers.get('Retry-After')
       const seconds = raw === null ? NaN : Number(raw)
       return {
-        quota: { ...empty('transientFailure', RATE_LIMITED_FOOTER), rateLimited: true },
+        quota: { ...empty('transientFailure', isBigModel ? ['BigModel rate-limited the quota request.'] : RATE_LIMITED_FOOTER), rateLimited: true },
         retryAfterSeconds: Math.max(Number.isFinite(seconds) ? Math.ceil(seconds) : 300, 60),
       }
     }
-    if (response.status >= 500) return { quota: empty('transientFailure', UNAVAILABLE_FOOTER) }
-    if (!response.ok) return { quota: empty('transientFailure', PARSE_FOOTER) }
+    if (response.status >= 500) return { quota: empty('transientFailure', isBigModel ? ['BigModel is temporarily unavailable.'] : UNAVAILABLE_FOOTER) }
+    const parseFooter = isBigModel ? ['BigModel returned no recognized Coding Plan quota windows.'] : PARSE_FOOTER
+    if (!response.ok) return { quota: empty('transientFailure', parseFooter) }
     // Never log the body - it carries account data.
     const decoded = decodeZcodeUsage(await response.json())
-    if (decoded === 'rejected') return { quota: empty('terminalFailure', EXPIRED_FOOTER) }
-    return { quota: decoded ?? empty('transientFailure', PARSE_FOOTER) }
+    if (decoded === 'rejected') return { quota: empty('terminalFailure', rejectedFooter) }
+    if (decoded && isBigModel) decoded.footerLines = [BIGMODEL_SOURCE]
+    return { quota: decoded ?? empty('transientFailure', parseFooter) }
   } catch (error) {
-    console.warn(`ZCode quota unavailable: ${sanitizeError(error)}`)
+    if (isBigModel) console.warn('BigModel quota unavailable')
+    else console.warn(`ZCode quota unavailable: ${sanitizeError(error)}`)
     return { quota: empty('transientFailure') }
   }
 }

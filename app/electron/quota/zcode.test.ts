@@ -213,3 +213,35 @@ describe('ZCode quota fetch', () => {
     expect(logged).toContain('[REDACTED]')
   })
 })
+
+describe('BigModel personal Coding Plan', () => {
+  const apiKey = 'synthetic-id.synthetic-secret'
+
+  it('uses the saved BigModel key on the domestic endpoint without forwarding the Z.ai login', async () => {
+    const base = deps({ '000003.log': journalEntry(STORAGE_KEY, TOKEN) })
+    const fetch = vi.fn(async () => okJson(successBody))
+    const { quota } = await fetchZcodeQuota({ ...base, fetch, readBigModelApiKey: async () => apiKey })
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(
+      'https://open.bigmodel.cn/api/monitor/usage/quota/limit',
+      expect.objectContaining({ method: 'GET', redirect: 'error', headers: expect.objectContaining({ Authorization: apiKey }) }),
+    )
+    expect(base.readDir).not.toHaveBeenCalled()
+    expect(quota).toMatchObject({
+      provider: 'zcode', connection: 'connected', planLabel: 'Pro',
+      footerLines: ['Source: BigModel Coding Plan'],
+      details: [{ label: '5-hour', percent: 0.15 }, { label: 'Weekly', percent: 0.03 }],
+    })
+  })
+
+  it('reports a business-level BigModel rejection without retrying against the international endpoint', async () => {
+    const fetch = vi.fn(async () => okJson({ code: 401, success: false }))
+    const { quota } = await fetchZcodeQuota({
+      ...deps({ '000003.log': journalEntry(STORAGE_KEY, TOKEN) }),
+      fetch, readBigModelApiKey: async () => apiKey,
+    })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(quota).toMatchObject({
+      connection: 'terminalFailure', footerLines: ['BigModel rejected the Coding Plan API key.'],
+    })
+  })
+})
