@@ -1315,7 +1315,11 @@ export type ProjectsReport = { projects: ProjectRow[] }
 
 export type IdeCommand = { section?: string; period?: string; refresh?: boolean }
 
+export type BigModelKeyResult = 'saved' | 'removed' | 'invalid-key' | 'unavailable' | 'storage-error'
+
 export interface CodeburnBridge {
+  /** Local macOS desktop connection. The key is entered once and never returned by the bridge. */
+  setBigModelApiKey?(value: string | null): Promise<BigModelKeyResult>
   /** Set by the VS Code extension's webview bridge; absent in the desktop app. */
   readonly host?: 'vscode'
   /** The extension's own version, set beside `host`. */

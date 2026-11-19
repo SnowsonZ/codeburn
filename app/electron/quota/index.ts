@@ -1,6 +1,7 @@
 import os from 'node:os'
 import path from 'node:path'
 
+import { readBigModelApiKey } from '../bigmodel-key'
 import { fetchAntigravityQuota } from './antigravity'
 import { claudeConfigDir, fetchClaudeQuota } from './claude'
 import { fetchCodexQuota } from './codex'
@@ -46,7 +47,10 @@ const defaultDeps: QuotaDeps = {
   // no remote endpoints), so it ignores the abort/keychain options entirely.
   antigravity: async () => ({ quota: await fetchAntigravityQuota() }),
   kimi: fetchKimiQuota,
-  zcode: fetchZcodeQuota,
+  zcode: options => fetchZcodeQuota({
+    ...options,
+    readBigModelApiKey: process.platform === 'darwin' ? readBigModelApiKey : undefined,
+  }),
   grokbot: options => fetchGrokbotQuota({ signal: options.signal }),
   grokbotInstalled,
   statePath: path.join(os.homedir(), '.codeburn', 'quota-backoff.json'),

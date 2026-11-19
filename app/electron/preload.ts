@@ -28,6 +28,7 @@ const bridge = {
   getCursorSync: () => invoke('codeburn:getCursorSync'),
   setCursorSync: (enabled: boolean) => invoke('codeburn:setCursorSync', enabled),
   getQuota: (force?: boolean, disabled?: string[]) => invoke('codeburn:getQuota', force, disabled),
+  setBigModelApiKey: (value: string | null) => invoke('codeburn:setBigModelApiKey', value),
   getOverview: (period: string, provider: string, range?: DateRange, configSource?: string | null, background?: boolean, scope?: string) => invoke('codeburn:getOverview', period, provider, range, configSource, background, scope),
   getTimeline: (period: string, provider: string, range?: DateRange) => invoke('codeburn:getTimeline', period, provider, range),
   getPlans: (period: string, background?: boolean) => invoke('codeburn:getPlans', period, background),

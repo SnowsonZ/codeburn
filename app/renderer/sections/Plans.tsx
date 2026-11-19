@@ -15,7 +15,7 @@ import { codeburn } from '../lib/ipc'
 import { motionClass } from '../lib/motion'
 import { PROVIDER_NAMES, PROVIDER_OWNERS, readDisabledProviders } from '../lib/providers'
 import { reportMemoKey } from '../lib/reportMemoKey'
-import type { JsonPlanSummary, Period, PlanId, PlanProvider, QuotaProvider, QuotaWindow, StatusJson } from '../lib/types'
+import type { BigModelKeyResult, JsonPlanSummary, Period, PlanId, PlanProvider, QuotaProvider, QuotaWindow, StatusJson } from '../lib/types'
 import type { SettingsPane } from './Settings'
 
 const PROVIDER_ORDER: PlanProvider[] = ['all', 'claude', 'codex', 'cursor', 'grok', 'antigravity']
@@ -152,12 +152,17 @@ export function stabilizeQuota(raw: QuotaProvider[], known: Map<QuotaProvider['p
   return out
 }
 
-function useStableQuota(raw: QuotaProvider[] | null): QuotaProvider[] | null {
+function useStableQuota(raw: QuotaProvider[] | null, bigModelRevision: number): QuotaProvider[] | null {
+  const lastBigModelRevision = useRef(bigModelRevision)
   const known = useRef(new Map<QuotaProvider['provider'], QuotaKnown>())
   const lastRaw = useRef<QuotaProvider[] | null | undefined>(undefined)
   const stable = useRef<QuotaProvider[] | null>(null)
   if (raw !== lastRaw.current) {
     lastRaw.current = raw
+    if (lastBigModelRevision.current !== bigModelRevision) {
+      known.current.delete('zcode')
+      lastBigModelRevision.current = bigModelRevision
+    }
     if (raw) stable.current = stabilizeQuota(raw, known.current, Date.now())
   }
   return raw === null ? null : stable.current
@@ -168,6 +173,7 @@ export function Plans({ period, refreshToken = 0, userRefreshToken = 0, onNaviga
   // guard) only on ⌘R or a card's Refresh / Check now. refreshToken also bumps
   // after config changes and project picks, which are no keychain consent.
   const [reconnectNonce, setReconnectNonce] = useState(0)
+  const [bigModelRevision, setBigModelRevision] = useState(0)
   const lastForced = useRef(`${userRefreshToken}:${reconnectNonce}`)
   const disabledProviders = readDisabledProviders()
   const quotaMemoKey = `quota|${[...disabledProviders].sort().join(',')}`
@@ -176,14 +182,14 @@ export function Plans({ period, refreshToken = 0, userRefreshToken = 0, onNaviga
     const force = key !== lastForced.current
     lastForced.current = key
     return codeburn.getQuota(force, disabledProviders)
-  }, [refreshToken, userRefreshToken, reconnectNonce, quotaMemoKey], { memoKey: quotaMemoKey })
+  }, [refreshToken, userRefreshToken, reconnectNonce, bigModelRevision, quotaMemoKey], { memoKey: quotaMemoKey })
   const reconnect = () => setReconnectNonce(value => value + 1)
   const budgetReport = usePolled<StatusJson>(() => codeburn.getPlans(period), [period, refreshToken], {
     enabled: ready,
     memoKey: reportMemoKey('plans', period),
   })
   const manualPlans = budgetReport.data ? manualPlanSummaries(budgetReport.data) : []
-  const stableQuota = useStableQuota(quota.data)
+  const stableQuota = useStableQuota(quota.data, bigModelRevision)
 
   return (
     <>
@@ -197,14 +203,14 @@ export function Plans({ period, refreshToken = 0, userRefreshToken = 0, onNaviga
       </div>
       <div className={motionClass('body', 'section-fade')}>
         {budgetReport.data && budgetReport.error && <StaleBanner error={budgetReport.error} />}
-        {renderQuota(stableQuota, quota.error, reconnect)}
+        {renderQuota(stableQuota, quota.error, reconnect, () => setBigModelRevision(value => value + 1))}
         {renderBudgetPlans(budgetReport.data, budgetReport.error, manualPlans)}
       </div>
     </>
   )
 }
 
-function renderQuota(data: QuotaProvider[] | null, error: ReturnType<typeof usePolled<QuotaProvider[]>>['error'], onReconnect: () => void) {
+function renderQuota(data: QuotaProvider[] | null, error: ReturnType<typeof usePolled<QuotaProvider[]>>['error'], onReconnect: () => void, onBigModelChange: () => void) {
   if (!data) {
     if (error) {
       return (
@@ -226,7 +232,7 @@ function renderQuota(data: QuotaProvider[] | null, error: ReturnType<typeof useP
 
   return (
     <div className="plans-grid">
-      {data.map(provider => <QuotaPanel key={provider.provider} quota={provider} onReconnect={onReconnect} />)}
+      {data.map(provider => <QuotaPanel key={provider.provider} quota={provider} onReconnect={onReconnect} onBigModelChange={onBigModelChange} />)}
     </div>
   )
 }
@@ -260,7 +266,11 @@ function renderBudgetPlans(data: StatusJson | null, error: ReturnType<typeof use
   )
 }
 
-function QuotaPanel({ quota, onReconnect }: { quota: QuotaProvider; onReconnect: () => void }) {
+function QuotaPanel({ quota, onReconnect, onBigModelChange }: {
+  quota: QuotaProvider
+  onReconnect: () => void
+  onBigModelChange: () => void
+}) {
   const providerName = PROVIDER_NAMES[quota.provider]
   return (
     <Panel
@@ -270,7 +280,67 @@ function QuotaPanel({ quota, onReconnect }: { quota: QuotaProvider; onReconnect:
     >
       <CardEmboss provider={quota.provider} />
       <QuotaContent quota={quota} onReconnect={onReconnect} />
+      {quota.provider === 'zcode' && codeburn.platform === 'darwin' && codeburn.setBigModelApiKey && (
+        <BigModelKeyForm onChanged={onBigModelChange} />
+      )}
     </Panel>
+  )
+}
+
+function BigModelKeyForm({ onChanged }: { onChanged: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [key, setKey] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<BigModelKeyResult | null>(null)
+
+  async function changeKey(value: string | null) {
+    if (busy || !codeburn.setBigModelApiKey) return
+    setBusy(true)
+    setResult(null)
+    setKey('')
+    try {
+      const outcome = await codeburn.setBigModelApiKey(value)
+      setResult(outcome)
+      if (outcome === 'saved' || outcome === 'removed') {
+        setOpen(false)
+        onChanged()
+      }
+    } catch {
+      setResult('storage-error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="bigmodel-key-control">
+      {open ? (
+        <form className="bigmodel-key-form" onSubmit={event => { event.preventDefault(); void changeKey(key) }}>
+          <label>
+            {t('plans.bigmodel.key')}
+            <input type="password" value={key} onChange={event => setKey(event.target.value)}
+              autoComplete="off" spellCheck={false} maxLength={512} disabled={busy} />
+          </label>
+          <div className="quota-connect">
+            <button type="submit" className="btnp btnp-primary" disabled={busy || !key.trim()}>
+              {t(busy ? 'plans.bigmodel.checking' : 'plans.bigmodel.connect')}
+            </button>{' '}
+            <button type="button" className="btnp" disabled={busy} onClick={() => void changeKey(null)}>
+              {t('plans.bigmodel.remove')}
+            </button>{' '}
+            <button type="button" className="btnp" disabled={busy}
+              onClick={() => { setOpen(false); setKey(''); setResult(null) }}>
+              {t('plans.bigmodel.cancel')}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button type="button" className="btnp" onClick={() => { setOpen(true); setResult(null) }}>
+          {t('plans.bigmodel.manage')}
+        </button>
+      )}
+      {result && <p role="status" className="quota-connection-note">{t(`plans.bigmodel.result.${result}`)}</p>}
+    </div>
   )
 }
 

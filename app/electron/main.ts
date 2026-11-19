@@ -1,11 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, powerMonitor, shell, type MenuItemConstructorOptions } from 'electron'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import { createBridgeHandlers as createHandlers, NO_UPDATE_STATUS, type Deps, type Handler } from './bridge-handlers'
 import { killAll, reapOrphanServe, resolveCodeburnPath, serveUsage, shutdownAll, spawnCli, spawnCliAction, startServe } from './cli'
 import { MenubarCompanion, readDockEnabled, STARTUP_APPS_SETTINGS_URL } from './menubar'
 import { MacMenubar, type InstallPhase } from './mac-menubar'
-import { getQuota } from './quota'
+import { setBigModelApiKey } from './bigmodel-key'
+import { getQuota, quotaService } from './quota'
 import { Telemetry } from './telemetry'
 import { autoUpdateSupported, createAutoUpdateChecker, releaseFeedOverride, type AutoUpdateChecker } from './auto-update'
 import { createCompanionUpdater, type CompanionUpdater, type CompanionUpdateStatus } from './companion-update'
@@ -158,6 +160,17 @@ function registerHandlers(): void {
   for (const [channel, handler] of Object.entries(handlers)) {
     ipcMain.handle(channel, (_event, ...args) => handler(...args))
   }
+  ipcMain.handle('codeburn:setBigModelApiKey', async (event, value: unknown) => {
+    const frame = event.senderFrame
+    const devUrl = process.env.VITE_DEV_SERVER_URL
+    const rendererUrl = devUrl ? new URL(devUrl).href : pathToFileURL(path.join(__dirname, '..', 'renderer', 'index.html')).href
+    if (process.platform !== 'darwin' || frame?.parent !== null || frame.url !== rendererUrl) {
+      return { ok: true, value: 'storage-error' }
+    }
+    const result = await setBigModelApiKey(value)
+    if (result === 'saved' || result === 'removed') quotaService.invalidate('zcode')
+    return { ok: true, value: result }
+  })
   ipcMain.handle('codeburn:chooseDirectory', async () => {
     const res = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
     return { ok: true, value: res.canceled ? null : (res.filePaths[0] ?? null) }
@@ -422,6 +435,9 @@ function bootstrap(): void {
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
+
+    // Published updater feeds do not include this locally built variant.
+    if (app.getName() === 'CodeBurn BigModel' || app.getName() === 'codeburn-bigmodel') return
 
     // Update availability: check once at launch, then every 24h, pushing each
     // result to any open window. Signed mac builds and the AppImage download and

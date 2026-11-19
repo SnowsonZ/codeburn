@@ -15,6 +15,7 @@
     "stage-menubar": "node scripts/stage-menubar.mjs --target nsis",
     "stage-menubar:store": "node scripts/stage-menubar.mjs --target appx",
     "package": "npm run stage-cli && npm run build && electron-builder --mac",
+    "package:bigmodel": "npm run stage-cli && npm run build && electron-builder --mac dir --arm64 --publish never --config.appId=local.codeburn.bigmodel --config.productName=\"CodeBurn BigModel\" --config.extraMetadata.name=codeburn-bigmodel --config.extraMetadata.productName=\"CodeBurn BigModel\" --config.electronDist=node_modules/electron/dist",
     "package:arm64": "npm run stage-cli && npm run build && electron-builder --mac --arm64",
     "package:x64": "npm run stage-cli && npm run build && electron-builder --mac --x64",
     "package:win": "npm run stage-cli && npm run stage-menubar && npm run build && electron-builder --win",

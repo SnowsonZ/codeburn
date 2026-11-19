@@ -263,7 +263,7 @@ export async function fetchZcodeQuota(options: Partial<ZcodeDeps> & {
   const deps = { ...defaultDeps(), ...options }
   let isBigModel = false
   try {
-    const bigModelKey = await options.readBigModelApiKey?.() ?? nonEmpty(deps.env['BIGMODEL_USAGE_API_KEY'])
+    const bigModelKey = await options.readBigModelApiKey?.() ?? null
     isBigModel = Boolean(bigModelKey)
     const rejectedFooter = isBigModel ? ['BigModel rejected the Coding Plan API key.'] : EXPIRED_FOOTER
     const token = bigModelKey ?? await zcodeAccessToken(deps)
