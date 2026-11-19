@@ -4,6 +4,52 @@
 	classes = {};
 	objectVersion = 56;
 	objects = {
+		AB1000000000000000000010 /* provider-codex.svg */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = image.svg;
+			name = provider-codex.svg;
+			path = "../Sources/CodeBurnMenubar/Resources/ProviderIcons/provider-codex.svg";
+			sourceTree = SOURCE_ROOT;
+		};
+		AB1000000000000000000020 /* provider-codex.svg in Resources */ = { isa = PBXBuildFile; fileRef = AB1000000000000000000010; };
+		AB1000000000000000000011 /* provider-zcode.svg */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = image.svg;
+			name = provider-zcode.svg;
+			path = "../Sources/CodeBurnMenubar/Resources/ProviderIcons/provider-zcode.svg";
+			sourceTree = SOURCE_ROOT;
+		};
+		AB1000000000000000000021 /* provider-zcode.svg in Resources */ = { isa = PBXBuildFile; fileRef = AB1000000000000000000011; };
+		AB1000000000000000000012 /* provider-antigravity.svg */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = image.svg;
+			name = provider-antigravity.svg;
+			path = "../Sources/CodeBurnMenubar/Resources/ProviderIcons/provider-antigravity.svg";
+			sourceTree = SOURCE_ROOT;
+		};
+		AB1000000000000000000022 /* provider-antigravity.svg in Resources */ = { isa = PBXBuildFile; fileRef = AB1000000000000000000012; };
+		AB1000000000000000000013 /* provider-claude.svg */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = image.svg;
+			name = provider-claude.svg;
+			path = "../Sources/CodeBurnMenubar/Resources/ProviderIcons/provider-claude.svg";
+			sourceTree = SOURCE_ROOT;
+		};
+		AB1000000000000000000023 /* provider-claude.svg in Resources */ = { isa = PBXBuildFile; fileRef = AB1000000000000000000013; };
+		AB1000000000000000000014 /* provider-gemini.svg */ = {
+			isa = PBXFileReference;
+			lastKnownFileType = image.svg;
+			name = provider-gemini.svg;
+			path = "../Sources/CodeBurnMenubar/Resources/ProviderIcons/provider-gemini.svg";
+			sourceTree = SOURCE_ROOT;
+		};
+		AB1000000000000000000024 /* provider-gemini.svg in Resources */ = { isa = PBXBuildFile; fileRef = AB1000000000000000000014; };
+		AB100000000000000000000D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (AB1000000000000000000020, AB1000000000000000000021, AB1000000000000000000022, AB1000000000000000000023, AB1000000000000000000024);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		AB1000000000000000000001 /* CodeBurnWidgets.swift in Sources */ = {
 			isa = PBXBuildFile;
 			fileRef = AB1000000000000000000002 /* CodeBurnWidgets.swift */;
@@ -29,7 +75,7 @@
 		};
 		AB1000000000000000000005 = {
 			isa = PBXGroup;
-			children = (AB1000000000000000000002, AB1000000000000000000006);
+			children = (AB1000000000000000000002, AB1000000000000000000010, AB1000000000000000000011, AB1000000000000000000012, AB1000000000000000000013, AB1000000000000000000014, AB1000000000000000000006);
 			sourceTree = "<group>";
 		};
 		AB1000000000000000000006 /* Products */ = {
@@ -41,7 +87,7 @@
 		AB1000000000000000000007 /* CodeBurnWidgets */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = AB100000000000000000000A;
-			buildPhases = (AB1000000000000000000004);
+			buildPhases = (AB1000000000000000000004, AB100000000000000000000D);
 			buildRules = ();
 			dependencies = ();
 			name = CodeBurnWidgets;
@@ -86,7 +132,7 @@
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = Widget.entitlements;
 				CODE_SIGNING_ALLOWED = NO;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;

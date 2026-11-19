@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 import WidgetKit
@@ -68,7 +69,6 @@ private enum QuotaPeriod {
         }
     }
 
-    var symbol: String { self == .fiveHours ? "clock" : "calendar" }
 }
 
 private struct QuotaWindow: Decodable {
@@ -127,14 +127,6 @@ private struct ModelQuotaRow: Identifiable {
     var fiveHours: QuotaWindow? = nil
     var weekly: QuotaWindow? = nil
     var standalone: QuotaWindow? = nil
-}
-
-private func shortModelGroup(_ name: String) -> String {
-    switch name.lowercased() {
-    case "claude and gpt models": "Claude / GPT"
-    case "gemini models": "Gemini"
-    default: name
-    }
 }
 
 private func modelQuotaRows(_ windows: [QuotaWindow]) -> [ModelQuotaRow] {
@@ -314,7 +306,8 @@ private struct WidgetCard: View {
     private let accent = Color(red: 0.98, green: 0.39, blue: 0.15)
     private let remainingColor = Color(red: 0.31, green: 0.75, blue: 0.49)
     private let usedColor = Color.gray.opacity(0.66)
-    private var quotaLabelWidth: CGFloat { large ? 108 : 90 }
+    private var quotaLabelWidth: CGFloat { large ? 61 : 49 }
+    private var quotaIconSize: CGFloat { large ? 18 : (wide ? 13 : 15) }
 
 
     var body: some View {
@@ -362,12 +355,7 @@ private struct WidgetCard: View {
         let raw = card == .quota ? entry.snapshot?.quota?.updatedAt : entry.snapshot?.usage?.updatedAt
         let updated = parseDate(raw)
         return HStack(spacing: 4) {
-            if card == .quota {
-                Image(systemName: "arrow.clockwise")
-                    .accessibilityLabel(copy("上次刷新", "Updated"))
-            } else {
-                Text(copy("上次刷新", "Updated"))
-            }
+            Text(copy("上次刷新", "Updated"))
             if let updated {
                 if civilCalendar.isDate(updated, inSameDayAs: entry.date) {
                     Text(updated, style: .time)
@@ -489,26 +477,23 @@ private struct WidgetCard: View {
                     if let window {
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 4) {
-                                Text(row.id.name).lineLimit(1).layoutPriority(1)
+                                harnessIcon(row.id)
+                                if row.id == .antigravity {
+                                    Rectangle().fill(Color.secondary.opacity(0.26)).frame(width: 1, height: 10)
+                                        .accessibilityHidden(true)
+                                    modelIcon(window.modelGroup)
+                                }
                                 Spacer(minLength: 0)
-                                if row.id != .antigravity {
-                                    if let period = window.accountPeriod {
-                                        periodIcon(period)
-                                    } else {
-                                        Text(window.name).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
-                                    }
+                                if row.id == .antigravity {
+                                    if let period = window.modelPeriod { periodLabel(period) }
+                                } else if let period = window.accountPeriod {
+                                    periodLabel(period)
+                                } else {
+                                    Text(window.name).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
                                 }
                                 remainingValue(window)
                             }
                             .font(.system(size: 11.5, weight: .medium))
-                            if row.id == .antigravity {
-                                HStack(spacing: 3) {
-                                    if let period = window.modelPeriod { periodIcon(period) }
-                                    Text(shortModelGroup(window.modelGroup))
-                                        .font(.system(size: 9)).foregroundStyle(.secondary)
-                                        .lineLimit(1).minimumScaleFactor(0.8)
-                                }
-                            }
                             quotaBar(window)
                         }
                         .accessibilityElement(children: .combine)
@@ -527,18 +512,18 @@ private struct WidgetCard: View {
         let antigravity = quota.agents.first { $0.id == .antigravity }
         let models = modelQuotaRows(antigravity.map(activeWindows) ?? [])
         let limit = large ? 8 : 3
-        return Grid(alignment: .leading, horizontalSpacing: large ? 14 : 8, verticalSpacing: large ? 10 : 3) {
+        return Grid(alignment: .leading, horizontalSpacing: large ? 14 : 8, verticalSpacing: large ? 10 : 2) {
             GridRow {
                 Color.clear.frame(width: quotaLabelWidth, height: 1).accessibilityHidden(true)
-                periodIcon(.fiveHours).frame(maxWidth: .infinity, alignment: .trailing)
-                periodIcon(.weekly).frame(maxWidth: .infinity, alignment: .trailing)
+                periodLabel(.fiveHours).frame(maxWidth: .infinity, alignment: .trailing)
+                periodLabel(.weekly).frame(maxWidth: .infinity, alignment: .trailing)
             }
             ForEach(accounts, id: \.id, content: accountQuotaRows)
             if !models.isEmpty {
-                Divider().gridCellUnsizedAxes(.horizontal)
-                HStack {
-                    Text("Antigravity").font(.system(size: large ? 12 : 10, weight: .semibold))
-                    Spacer()
+                HStack(spacing: 8) {
+                    harnessIcon(.antigravity)
+                    Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 1)
+                        .accessibilityHidden(true)
                     if models.count > limit {
                         let extra = models.count - limit
                         Text("+\(extra)").font(.system(size: 9))
@@ -550,12 +535,12 @@ private struct WidgetCard: View {
                 ForEach(models.prefix(limit)) { model in
                     if let standalone = model.standalone {
                         GridRow {
-                            quotaRowLabel(shortModelGroup(model.group), nested: true).accessibilityLabel(model.group)
+                            quotaIconCell(modelIcon(model.group), nested: true)
                             quotaCell(standalone).gridCellColumns(2)
                         }
                     } else {
                         GridRow {
-                            quotaRowLabel(shortModelGroup(model.group), nested: true).accessibilityLabel(model.group)
+                            quotaIconCell(modelIcon(model.group), nested: true)
                             quotaCell(model.fiveHours, period: .fiveHours)
                             quotaCell(model.weekly, period: .weekly)
                         }
@@ -573,14 +558,14 @@ private struct WidgetCard: View {
         let weekly = windows.first { $0.accountPeriod == .weekly }
         if fiveHours != nil || weekly != nil {
             GridRow {
-                quotaRowLabel(account.id.name)
+                quotaIconCell(harnessIcon(account.id))
                 quotaCell(fiveHours, period: .fiveHours)
                 quotaCell(weekly, period: .weekly)
             }
         }
         ForEach(windows.filter { $0.accountPeriod == nil }, id: \.label) { window in
             GridRow {
-                quotaRowLabel(account.id.name)
+                quotaIconCell(harnessIcon(account.id))
                 HStack(spacing: 5) {
                     Text(window.name).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
                     quotaCell(window)
@@ -590,19 +575,61 @@ private struct WidgetCard: View {
         }
     }
 
-    private func quotaRowLabel(_ name: String, nested: Bool = false) -> some View {
-        Text(name)
-            .font(.system(size: large ? 13 : 11, weight: nested ? .regular : .semibold))
-            .lineLimit(1).minimumScaleFactor(0.8)
-            .padding(.leading, nested ? 8 : 0)
+    private func quotaIconCell<Icon: View>(_ icon: Icon, nested: Bool = false) -> some View {
+        icon.padding(.leading, nested ? 8 : 0)
             .frame(width: quotaLabelWidth, alignment: .leading)
     }
 
-    private func periodIcon(_ period: QuotaPeriod) -> some View {
-        Image(systemName: period.symbol)
+    private func periodLabel(_ period: QuotaPeriod) -> some View {
+        Text(period.title)
             .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
-            .accessibilityLabel(period.title)
-            .help(period.title)
+            .lineLimit(1)
+    }
+
+    private func harnessIcon(_ agent: Agent) -> some View {
+        quotaLogo("provider-" + agent.rawValue, fallback: "terminal")
+            .accessibilityLabel(agent.name)
+            .help(agent.name)
+    }
+
+    private func modelIcon(_ group: String) -> some View {
+        let name = group.lowercased()
+        let claude = name.contains("claude")
+        let gpt = name.contains("gpt")
+        let gemini = name.contains("gemini")
+        return HStack(spacing: 3) {
+            if claude { quotaLogo("provider-claude", fallback: "sun.max") }
+            if gpt { quotaLogo("provider-codex", fallback: "circle.hexagongrid") }
+            if gemini {
+                quotaLogo("provider-gemini", fallback: "sparkle")
+                if name.contains("argon") {
+                    Text("Ar")
+                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                        .padding(.horizontal, 2).padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
+                }
+            }
+            if !claude && !gpt && !gemini {
+                Image(systemName: "cpu").font(.system(size: quotaIconSize))
+            }
+        }
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(group)
+        .help(group)
+    }
+
+    @ViewBuilder
+    private func quotaLogo(_ name: String, fallback: String) -> some View {
+        if let url = Bundle.main.url(forResource: name, withExtension: "svg"),
+           let image = NSImage(contentsOf: url) {
+            Image(nsImage: image).renderingMode(.template).resizable().scaledToFit()
+                .frame(width: quotaIconSize, height: quotaIconSize)
+                .foregroundStyle(.primary)
+        } else {
+            Image(systemName: fallback).font(.system(size: quotaIconSize))
+                .frame(width: quotaIconSize, height: quotaIconSize)
+        }
     }
 
     private func remainingValue(_ window: QuotaWindow) -> some View {
