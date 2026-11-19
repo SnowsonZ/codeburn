@@ -473,6 +473,40 @@ describe('App shortcuts', () => {
     await waitFor(() => expect(mocks.getQuota).toHaveBeenCalledWith(true, expect.any(Array)))
   })
 
+  it('connects BigModel from the ZCode card and refreshes the quota display', async () => {
+    const setBigModelApiKey = vi.fn(async () => {
+      mocks.getQuota.mockResolvedValue([{
+        provider: 'zcode', connection: 'connected', planLabel: 'Pro',
+        primary: null, details: [{ label: '5-hour', percent: 0.15, resetsAt: null }],
+        footerLines: ['Source: BigModel Coding Plan'],
+      }])
+      return 'saved' as const
+    })
+    const bridge = mocks as typeof mocks & { platform?: string; setBigModelApiKey?: typeof setBigModelApiKey }
+    bridge.platform = 'darwin'
+    bridge.setBigModelApiKey = setBigModelApiKey
+    mocks.getQuota.mockResolvedValue([{
+      provider: 'zcode', connection: 'disconnected', planLabel: null, primary: null, details: [], footerLines: [],
+    }])
+    try {
+      render(<App />)
+      expect(await screen.findByText('Most expensive sessions')).toBeInTheDocument()
+      fireEvent.keyDown(document, { key: '8', metaKey: true })
+      fireEvent.click(await screen.findByRole('button', { name: 'Set up BigModel quota' }))
+      const input = screen.getByLabelText('BigModel Coding Plan API key')
+      expect(input).toHaveAttribute('type', 'password')
+      fireEvent.change(input, { target: { value: 'synthetic-id.synthetic-secret' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Check and save' }))
+      expect(setBigModelApiKey).toHaveBeenCalledWith('synthetic-id.synthetic-secret')
+      expect(await screen.findByText('BigModel quota connected.')).toBeInTheDocument()
+      expect(await screen.findByTestId('quota-track-5-hour')).toBeInTheDocument()
+      expect(screen.queryByLabelText('BigModel Coding Plan API key')).not.toBeInTheDocument()
+    } finally {
+      delete bridge.platform
+      delete bridge.setBigModelApiKey
+    }
+  })
+
   it('forces the quota refresh an IDE command asks for while it opens Plans from Overview', async () => {
     let send: ((command: { section?: string; refresh?: boolean }) => void) | undefined
     const bridge = mocks as unknown as { onIdeCommand?: (cb: (command: { section?: string; refresh?: boolean }) => void) => () => void }
