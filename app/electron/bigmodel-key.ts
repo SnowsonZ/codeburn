@@ -1,9 +1,10 @@
 import { rm } from 'node:fs/promises'
 import path from 'node:path'
 
-import type { BigModelKeyResult } from '../renderer/lib/types'
 import { atomicWriteSecureFile, readSecureFile } from './quota/security'
 import { fetchZcodeQuota } from './quota/zcode'
+
+export type BigModelKeyResult = 'saved' | 'removed' | 'invalid-key' | 'unavailable' | 'storage-error'
 
 const KEY_FILE = 'bigmodel-coding-plan.key'
 

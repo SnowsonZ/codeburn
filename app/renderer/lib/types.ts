@@ -1315,7 +1315,8 @@ export type ProjectsReport = { projects: ProjectRow[] }
 
 export type IdeCommand = { section?: string; period?: string; refresh?: boolean }
 
-export type BigModelKeyResult = 'saved' | 'removed' | 'invalid-key' | 'unavailable' | 'storage-error'
+import type { BigModelKeyResult } from '../../electron/bigmodel-key'
+export type { BigModelKeyResult } from '../../electron/bigmodel-key'
 
 export interface CodeburnBridge {
   /** Local macOS desktop connection. The key is entered once and never returned by the bridge. */
