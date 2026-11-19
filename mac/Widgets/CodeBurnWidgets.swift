@@ -222,11 +222,18 @@ private struct WidgetCard: View {
     private let accent = Color(red: 0.98, green: 0.39, blue: 0.15)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(card.title, systemImage: card.symbol)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(accent)
-                .widgetAccentable()
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Label(card.title, systemImage: card.symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .widgetAccentable()
+                if card == .quota {
+                    Spacer()
+                    Text(copy("已用", "Used"))
+                        .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                }
+            }
             switch card {
             case .today:
                 if let usage = entry.snapshot?.usage, usage.day == dayKey(entry.date) { today(usage) }
@@ -239,6 +246,7 @@ private struct WidgetCard: View {
                 else { empty(copy("等待额度同步", "Waiting for quota")) }
             }
             Spacer(minLength: 0)
+            refreshTime
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .containerBackground(for: .widget) { Color(nsColor: .windowBackgroundColor) }
@@ -251,49 +259,96 @@ private struct WidgetCard: View {
             .frame(maxHeight: .infinity, alignment: .center)
     }
 
+    private var refreshTime: some View {
+        let raw = card == .quota ? entry.snapshot?.quota?.updatedAt : entry.snapshot?.usage?.updatedAt
+        let updated = parseDate(raw)
+        return HStack(spacing: 4) {
+            Text(copy("上次刷新", "Updated"))
+            if let updated {
+                if civilCalendar.isDate(updated, inSameDayAs: entry.date) {
+                    Text(updated, style: .time)
+                } else {
+                    Text(updated, format: .dateTime.month(.defaultDigits).day().hour().minute())
+                }
+            } else {
+                Text("—")
+            }
+        }
+        .font(.system(size: 10, weight: .medium))
+        .monospacedDigit().foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
+        .accessibilityElement(children: .combine)
+    }
+
     private func today(_ usage: UsageSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(compact(usage.total))
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Text("Token").font(.caption2).foregroundStyle(.secondary)
-                if wide, let rate = usage.cacheRate {
-                    Spacer()
-                    Text(copy("缓存命中", "Cache hit") + " " + percent(rate))
-                        .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                if wide {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        usageTotal(usage.total)
+                        tokenUnit
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        usageTotal(usage.total)
+                        tokenUnit
+                    }
+                }
+                if let rate = usage.cacheRate {
+                    Spacer(minLength: 0)
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(percent(rate))
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .monospacedDigit().lineLimit(1)
+                        Text(copy("缓存命中", "Cache hit"))
+                            .font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(copy("缓存命中率", "Cache hit rate") + " " + percent(rate))
                 }
             }
             ForEach(usage.agents, id: \.id) { row in
                 HStack(spacing: 5) {
-                    Circle().fill(row.id.color).frame(width: 5, height: 5).accessibilityHidden(true)
-                    Text(row.id.name).lineLimit(1)
+                    agentName(row.id)
                     Spacer(minLength: 2)
-                    Text(compact(row.tokens)).monospacedDigit().lineLimit(1)
+                    Text(compact(row.tokens)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
                     if wide, let input = row.input, input > 0, let cached = row.cached {
-                        Text(percent(Double(cached) / Double(input)))
+                        let hit = percent(Double(cached) / Double(input))
+                        Text(hit)
                             .foregroundStyle(.secondary)
-                            .frame(width: 44, alignment: .trailing)
-                            .accessibilityLabel(copy("缓存命中", "Cache hit") + " " + percent(Double(cached) / Double(input)))
+                            .frame(width: 43, alignment: .trailing)
+                            .accessibilityLabel(copy("缓存命中", "Cache hit") + " " + hit)
                     }
                 }
-                .font(.system(size: 10))
-            }
-            if !wide, let rate = usage.cacheRate {
-                Text(copy("缓存命中", "Cache hit") + " " + percent(rate))
-                    .font(.system(size: 9)).foregroundStyle(.secondary)
+                .font(.system(size: 11.5, weight: .medium))
             }
         }
     }
 
+    private func usageTotal(_ total: Int?) -> some View {
+        Text(compact(total))
+            .font(.system(size: 31, weight: .semibold, design: .rounded))
+            .monospacedDigit().lineLimit(1).minimumScaleFactor(0.62)
+    }
+
+    private var tokenUnit: some View {
+        Text("Token").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
+    }
+
+    private func agentName(_ agent: Agent) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(agent.color).frame(width: 5, height: 5).accessibilityHidden(true)
+            Text(agent.name).lineLimit(1)
+        }
+        .layoutPriority(1)
+    }
+
     private func trend(_ usage: UsageSnapshot) -> some View {
         let maximum = max(1, usage.days.compactMap(\.tokens).max() ?? 0)
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(compact(sum(usage.days.map(\.tokens))))
-                    .font(.system(size: 24, weight: .semibold, design: .rounded))
+                    .font(.system(size: 29, weight: .semibold, design: .rounded))
                     .monospacedDigit().lineLimit(1).minimumScaleFactor(0.65)
                 Text("Token").font(.caption2).foregroundStyle(.secondary)
             }
@@ -301,54 +356,103 @@ private struct WidgetCard: View {
                 ForEach(usage.days) { row in
                     VStack(spacing: 3) {
                         Spacer(minLength: 0)
-                        let height = CGFloat(row.tokens ?? 0) / CGFloat(maximum) * 42
+                        let height = CGFloat(row.tokens ?? 0) / CGFloat(maximum) * 35
                         RoundedRectangle(cornerRadius: 3)
                             .fill(row.day == usage.day ? accent : accent.opacity(0.4))
                             .opacity(row.tokens == nil ? 0 : 1)
                             .frame(height: max(2, height))
                         Text(parseDay(row.day)?.formatted(.dateTime.weekday(.narrow)) ?? "—")
-                            .font(.system(size: 9)).foregroundStyle(.secondary)
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(row.day + ", " + compact(row.tokens) + " Token")
                 }
             }
-            .frame(height: 56)
+            .frame(height: 49)
         }
     }
 
     private func quotas(_ quota: QuotaSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(quota.agents, id: \.id) { row in
                 let current = row.windows.filter { $0.isActive(at: entry.date) }
-                HStack(spacing: 5) {
-                    Circle().fill(row.id.color).frame(width: 5, height: 5).accessibilityHidden(true)
-                    Text(row.id.name).lineLimit(1).layoutPriority(1)
-                    Spacer(minLength: 0)
-                    if current.isEmpty {
-                        Text("—").foregroundStyle(.secondary)
-                            .accessibilityLabel(copy("暂无额度", "Quota unavailable"))
-                    } else {
-                        ForEach(current.prefix(wide ? 2 : 1), id: \.label) { window in
-                            Text((wide || window.name.count <= 8 ? window.name + " " : "") + percent(window.percent))
-                                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
-                                .foregroundStyle(window.percent >= 0.9 ? .red : .primary)
-                                .accessibilityLabel(window.name + " " + copy("已用", "used") + " " + percent(window.percent))
+                if wide {
+                    HStack(alignment: .center, spacing: 10) {
+                        agentName(row.id).frame(width: 78, alignment: .leading)
+                        quotaColumn(current.first, agent: row.id)
+                        quotaColumn(current.dropFirst().first, agent: row.id)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 4) {
+                            agentName(row.id)
+                            Spacer(minLength: 0)
+                            quotaPercentage(current.first, agent: row.id, showName: true)
                         }
+                        quotaBar(current.first, agent: row.id)
                     }
                 }
-                .font(.system(size: 10))
             }
-            if let time = parseDate(quota.updatedAt) {
-                HStack(spacing: 3) {
-                    Text(copy("上次同步", "Last synced"))
-                    Text(time, style: .time)
-                }
-                .font(.system(size: 9)).foregroundStyle(.secondary)
-            }
+            .font(.system(size: 11.5, weight: .medium))
         }
     }
+
+    private func quotaColumn(_ window: QuotaWindow?, agent: Agent) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                if let window {
+                    Text(window.name).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
+                        .accessibilityHidden(true)
+                }
+                Spacer(minLength: 0)
+                quotaPercentage(window, agent: agent, showName: false)
+            }
+            quotaBar(window, agent: agent)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func quotaPercentage(_ window: QuotaWindow?, agent: Agent, showName: Bool) -> some View {
+        if let window {
+            let rate = percent(window.percent)
+            let value = Text(rate)
+                .monospacedDigit()
+                .foregroundStyle(window.percent >= 0.9 ? Color.red : Color.primary)
+                .fixedSize()
+            ViewThatFits(in: .horizontal) {
+                if showName && window.name.count <= 8 {
+                    HStack(spacing: 3) {
+                        Text(window.name).font(.system(size: 10)).foregroundStyle(.secondary)
+                        value
+                    }
+                    .fixedSize()
+                }
+                value
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(agent.name + " " + window.name + " " + copy("已用", "used") + " " + rate)
+        } else {
+            Text("—").foregroundStyle(.secondary)
+                .accessibilityLabel(copy("暂无额度", "Quota unavailable"))
+        }
+    }
+
+    private func quotaBar(_ window: QuotaWindow?, agent: Agent) -> some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.20))
+                if let window, window.percent > 0 {
+                    Capsule().fill(window.percent >= 0.9 ? Color.red : agent.color)
+                        .frame(width: geometry.size.width * min(1, window.percent))
+                }
+            }
+        }
+        .frame(height: 4)
+        .accessibilityHidden(true)
+    }
+
 }
 
 @MainActor

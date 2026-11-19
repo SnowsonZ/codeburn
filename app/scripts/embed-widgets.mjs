@@ -24,9 +24,8 @@ function plist(file, key) {
 
 try {
   const marketingVersion = plist(hostInfo, 'CFBundleShortVersionString')
-  // The manually packaged preview used the marketing version as its native
-  // build number. A higher build supersedes its cached widget descriptors.
-  const buildVersion = '1'
+  // WidgetKit uses the native build number to invalidate cached widget views.
+  const buildVersion = '2'
   run('xcodebuild', [
     '-project', path.join(sources, name + '.xcodeproj'), '-scheme', name,
     '-configuration', 'Release', '-destination', 'generic/platform=macOS',
