@@ -102,7 +102,7 @@ function icon(stack, name, size, fallback, color = palette.primary) {
 function identity(stack, row, height) {
   const rail = slot(stack, railWidth, height)
   if (row.id) {
-    const size = Math.min(height - 2, row.id === 'zcode' ? 22 : 18)
+    const size = Math.min(height - 1, row.id === 'zcode' ? 24 : 21)
     rail.addSpacer(Math.max(1, (22 - size) / 2))
     icon(rail, row.id, size, 'terminal')
     if (row.stale) {
@@ -116,7 +116,7 @@ function identity(stack, row, height) {
     const gpt = name.includes('gpt')
     const gemini = name.includes('gemini')
     const model = claude ? 'claude' : gpt ? 'codex' : gemini ? 'gemini' : null
-    const size = Math.min(height - 2, 14)
+    const size = Math.min(height - 2, 16)
     icon(rail, model, size, 'cpu')
     if (claude && gpt) {
       rail.addSpacer(3)
@@ -174,7 +174,7 @@ function bar(parent, width, height, remaining, detailed) {
   if (remaining === 0) {
     if (detailed && width >= 28) {
       view.addSpacer()
-      text(view, '耗尽', Font.semiboldSystemFont(Math.min(7, height - 1.5)), palette.eject)
+      text(view, '耗尽', Font.semiboldSystemFont(Math.min(10, height * 0.72)), palette.eject)
       view.addSpacer()
     }
     return
@@ -214,11 +214,13 @@ function bar(parent, width, height, remaining, detailed) {
   const start = left + side * 0.63 + 1
   const track = Math.max(1, width - 2 * start)
   canvas.setFillColor(paint.used)
-  canvas.fillRect(new Rect(start, centerY - 1.6, track, 3.2))
+  const tapeHeight = Math.min(6, height * 0.34)
+  const tapeTop = centerY - tapeHeight / 2
+  canvas.fillRect(new Rect(start, tapeTop, track, tapeHeight))
   canvas.setFillColor(paint.accent)
-  canvas.fillRect(new Rect(start, centerY - 1.6, track * remaining, 3.2))
+  canvas.fillRect(new Rect(start, tapeTop, track * remaining, tapeHeight))
   canvas.setFillColor(paint.rule)
-  for (const part of [0.25, 0.5, 0.75]) canvas.fillRect(new Rect(start + track * part, centerY - 1.6, 0.55, 3.2))
+  for (const part of [0.25, 0.5, 0.75]) canvas.fillRect(new Rect(start + track * part, tapeTop, 0.55, tapeHeight))
   const image = view.addImage(canvas.getImage())
   image.imageSize = new Size(width, height)
 }
@@ -244,11 +246,11 @@ function quotaCell(parent, width, rowHeight, valueSize, window, now, label) {
     barWidth -= labelWidth + numberGap
     view.addSpacer(numberGap)
   }
-  const barHeight = Math.min(rowHeight - 2, valueSize >= 15 ? 16 : 11)
+  const barHeight = Math.min(rowHeight - 2, Math.round(valueSize * 1.17))
   bar(view, barWidth, barHeight, Math.max(0, 1 - window.percent), true)
   view.addSpacer(numberGap)
   const value = slot(view, numberWidth, rowHeight)
-  value.addSpacer(Math.max(1, Math.floor(numberWidth - amount.length * valueSize * 0.64 - 2)))
+  value.addSpacer()
   text(value, amount, Font.semiboldMonospacedSystemFont(valueSize))
 }
 
@@ -279,16 +281,23 @@ function quotaTable(widget, quota, now, width, tableBudget, large) {
     text(widget, '额度暂不可用', Font.mediumSystemFont(10), palette.secondary)
     return
   }
-  const pitch = Math.min(large ? 27 : 16, Math.floor(rowBudget / rows.length))
-  const gap = large ? 3 : pitch >= 13 ? 2 : 1
-  const rowHeight = pitch - gap
-  const valueSize = rowHeight >= 20 ? 13 : Math.min(9.75, rowHeight - 1.5)
+  const pitch = Math.floor(rowBudget / rows.length)
+  const gap = large && pitch >= 24 ? 4 : pitch >= 16 ? 2 : 1
+  const gapsHeight = gap * (rows.length - 1)
+  const dividerCount = rows.filter(row => row.rule).length
+  const dividerHeight = Math.min(large ? 24 : 12, pitch - gap)
+  const dataRows = rows.length - dividerCount
+  const rowHeight = Math.min(large ? 43 : 24, Math.floor(
+    (rowBudget - gapsHeight - dividerCount * dividerHeight) / Math.max(1, dataRows),
+  ))
+  const valueSize = Math.min(large ? 18 : 13, rowHeight - 1.5)
 
   // Fit a fixed-height table to the card, without stretchable row gaps.
   const table = widget.addStack()
   table.layoutVertically()
   table.spacing = 0
-  table.size = new Size(width, headerHeight + headerGap + pitch * rows.length - gap)
+  table.size = new Size(width, headerHeight + headerGap + dataRows * rowHeight +
+    dividerCount * dividerHeight + gapsHeight)
   const headers = slot(table, width, headerHeight)
   const identityHeading = slot(headers, railWidth, headerHeight)
   if (hidden) text(identityHeading, `另 ${hidden} 条`, Font.mediumSystemFont(large ? 9.5 : 8), palette.secondary)
@@ -303,11 +312,12 @@ function quotaTable(widget, quota, now, width, tableBudget, large) {
   table.addSpacer(headerGap)
   for (const [index, row] of rows.entries()) {
     if (index > 0) table.addSpacer(gap)
-    const line = slot(table, width, rowHeight)
-    identity(line, row, rowHeight)
+    const height = row.rule ? dividerHeight : rowHeight
+    const line = slot(table, width, height)
+    identity(line, row, height)
     line.addSpacer(columnGap)
     if (row.rule) {
-      rule(slot(line, span, rowHeight), span)
+      rule(slot(line, span, height), span)
     } else if (row.message) {
       const message = slot(line, span, rowHeight)
       message.addSpacer()
@@ -699,7 +709,7 @@ function vinylWidget(card, data, status, now, family, art) {
     smallQuota(content, data, now, contentWidth)
   } else {
     const large = family === 'large'
-    const tableBudget = height - (2 * inset + 18 + 4 + 13 + 8)
+    const tableBudget = height - (2 * inset + 18 + 4 + 13 + 5)
     quotaTable(content, data, now, contentWidth, tableBudget, large)
   }
 

@@ -405,6 +405,7 @@ private struct SnapshotProvider: TimelineProvider {
 
 private struct QuotaGridMetrics {
     let rowHeight: CGFloat
+    let dividerHeight: CGFloat
     let spacing: CGFloat
     let headingHeight: CGFloat
     let modelLimit: Int
@@ -412,17 +413,26 @@ private struct QuotaGridMetrics {
     init(height: CGFloat, large: Bool, accountRows: Int, modelRows: Int, hasAntigravity: Bool) {
         headingHeight = large ? 17 : 12
         let budget = max(0, height - headingHeight)
-        let fixedRows = accountRows + (hasAntigravity ? 1 : 0)
-        let capacity = max(0, Int(budget / (large ? 19 : 11)) - fixedRows)
-        modelLimit = min(modelRows, large ? 8 : 3, capacity)
-        let rowCount = CGFloat(max(1, fixedRows + modelLimit))
+        let providerRow = hasAntigravity ? 1 : 0
+        let capacity = max(0, Int(budget / (large ? 19 : 11)) - accountRows - providerRow)
+        let limit = min(modelRows, capacity)
+        modelLimit = limit
+        let dividerCount = hasAntigravity && modelRows > 0 ? 1 : 0
+        let dataRows = CGFloat(max(1, accountRows + providerRow + limit - dividerCount))
+        let rowCount = dataRows + CGFloat(dividerCount)
         let pitch = budget / rowCount
-        rowHeight = min(large ? 43 : 16, floor(max(0, pitch - (large ? 5 : 1))))
-        spacing = min(large ? 13 : 4, max(0, pitch - rowHeight))
+        let gap: CGFloat = large && pitch >= 24 ? 4 : pitch >= 16 ? 2 : 1
+        spacing = gap
+        let divider = max(0, min(large ? 24 : 12, floor(pitch - gap)))
+        dividerHeight = divider
+        let remaining = budget - rowCount * gap - CGFloat(dividerCount) * divider
+        rowHeight = max(0, min(large ? 43 : 24, floor(remaining / dataRows)))
     }
 
-    var valueSize: CGFloat { rowHeight >= 28 ? 16 : rowHeight >= 18 ? 13 : 10.5 }
-    var valueWidth: CGFloat { ceil(valueSize * 2.5 + 2) }
+    var valueSize: CGFloat { min(18, max(7, floor(rowHeight * 0.84))) }
+    var valueWidth: CGFloat { max(32, ceil(valueSize * 2.5 + 3)) }
+    var iconSize: CGFloat { min(21, max(7, rowHeight - 2)) }
+    var barHeight: CGFloat { min(max(1, rowHeight - 2), round(valueSize * 1.2)) }
 }
 
 private struct WidgetCard: View {
@@ -831,7 +841,8 @@ private struct WidgetCard: View {
                     unavailableQuotaRow(antigravity, metrics: metrics)
                 } else if let antigravity {
                     GridRow {
-                        quotaIconCell(quotaSourceIcon(antigravity), height: metrics.rowHeight)
+                        quotaIconCell(quotaSourceIcon(antigravity, size: min(19, max(7, metrics.dividerHeight - 1))),
+                                      height: metrics.dividerHeight)
                         HStack(spacing: 6) {
                             Rectangle().fill(ruleColor).frame(height: 1).accessibilityHidden(true)
                             if models.count > metrics.modelLimit {
@@ -857,7 +868,7 @@ private struct WidgetCard: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 
@@ -869,14 +880,14 @@ private struct WidgetCard: View {
         if windows.isEmpty { unavailableQuotaRow(account, metrics: metrics) }
         if fiveHours != nil || weekly != nil {
             GridRow {
-                quotaIconCell(quotaSourceIcon(account), height: metrics.rowHeight)
+                quotaIconCell(quotaSourceIcon(account, size: metrics.iconSize), height: metrics.rowHeight)
                 quotaCell(fiveHours, metrics: metrics, period: .fiveHours).frame(width: column)
                 quotaCell(weekly, metrics: metrics, period: .weekly).frame(width: column)
             }
         }
         ForEach(windows.filter { $0.accountPeriod == nil }, id: \.label) { window in
             GridRow {
-                quotaIconCell(quotaSourceIcon(account), height: metrics.rowHeight)
+                quotaIconCell(quotaSourceIcon(account, size: metrics.iconSize), height: metrics.rowHeight)
                 HStack(spacing: 5) {
                     Text(window.name).font(.system(size: 9)).foregroundStyle(secondaryColor).lineLimit(1)
                     quotaCell(window, metrics: metrics)
@@ -901,16 +912,18 @@ private struct WidgetCard: View {
 
     private func unavailableQuotaRow(_ agent: QuotaAgent, metrics: QuotaGridMetrics) -> some View {
         GridRow {
-            quotaIconCell(quotaSourceIcon(agent), height: metrics.rowHeight)
+            quotaIconCell(quotaSourceIcon(agent, size: metrics.iconSize), height: metrics.rowHeight)
             unavailableQuotaValue
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .gridCellColumns(2)
         }
     }
 
-    private func quotaSourceIcon(_ agent: QuotaAgent) -> some View {
+    private func quotaSourceIcon(_ agent: QuotaAgent, size: CGFloat? = nil) -> some View {
         HStack(spacing: 4) {
-            harnessIcon(agent.id)
+            quotaLogo("provider-" + agent.id.rawValue, fallback: "terminal", size: size ?? quotaIconSize)
+                .accessibilityLabel(agent.id.name)
+                .help(agent.id.name)
             if agent.stale == true {
                 let title = copy("显示上次取得的额度", "Showing last known quota")
                 Image(systemName: "clock.arrow.circlepath")
@@ -927,7 +940,7 @@ private struct WidgetCard: View {
         quotaIconCell(
             HStack(spacing: 4) {
                 Rectangle().fill(ruleColor).frame(width: 1, height: height).accessibilityHidden(true)
-                modelIcon(group, size: quotaIconSize - 2)
+                modelIcon(group, size: min(quotaIconSize - 2, max(7, height - 2)))
             }
             .padding(.leading, 6), height: height)
     }
@@ -936,12 +949,6 @@ private struct WidgetCard: View {
         Text(period.title)
             .font(.system(size: large ? 11 : 9, weight: .medium)).foregroundStyle(secondaryColor)
             .lineLimit(1)
-    }
-
-    private func harnessIcon(_ agent: Agent) -> some View {
-        quotaLogo("provider-" + agent.rawValue, fallback: "terminal", size: quotaIconSize)
-            .accessibilityLabel(agent.name)
-            .help(agent.name)
     }
 
     private func modelIcon(_ group: String, size: CGFloat) -> some View {
@@ -1018,8 +1025,8 @@ private struct WidgetCard: View {
     private func quotaCell(_ window: QuotaWindow?, metrics: QuotaGridMetrics, period: QuotaPeriod? = nil) -> some View {
         if let window, window.isActive(at: entry.date) {
             HStack(spacing: large ? 7 : 4) {
-                cassette(window, height: min(large ? 20 : 13, metrics.rowHeight))
-                remainingValue(window).frame(width: large ? metrics.valueWidth : 32, alignment: .trailing)
+                cassette(window, height: metrics.barHeight)
+                remainingValue(window).frame(width: metrics.valueWidth, alignment: .trailing)
             }
             .font(.system(size: metrics.valueSize, weight: .semibold, design: .monospaced))
             .frame(height: metrics.rowHeight)
