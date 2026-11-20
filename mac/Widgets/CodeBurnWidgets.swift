@@ -302,13 +302,13 @@ private enum VinylFinish: String {
 
     static func load() -> Self {
         guard let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return .silver
+            return .system
         }
         let file = directory.appending(path: "CodeBurn Widgets/vinyl-finish")
         guard let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 16,
               let value = try? String(contentsOf: file, encoding: .utf8),
               let finish = Self(rawValue: value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            return .silver
+            return .system
         }
         return finish
     }
@@ -377,7 +377,7 @@ private enum VinylFinish: String {
 private struct Entry: TimelineEntry {
     let date: Date
     let snapshot: Snapshot?
-    var finish: VinylFinish = .silver
+    var finish: VinylFinish = .system
 }
 
 private struct SnapshotProvider: TimelineProvider {

@@ -38,7 +38,7 @@ npm --prefix app run package:widgets
 
 ## iPhone 小组件
 
-Scriptable 提供「套餐额度」「今日用量」和「7 天趋势」。Mac 上的 CodeBurn 负责同步额度和用量，iPhone 通过同一 Tailscale 私网读取汇总。黑胶外观默认银白，也可在小组件的 Parameter 填入 `dark`、`walnut` 或 `system`。Mac 的三张卡片共享外观，可用以下命令更改，下一次刷新时应用。
+Scriptable 提供「套餐额度」「今日用量」和「7 天趋势」。Mac 上的 CodeBurn 负责同步额度和用量，iPhone 通过同一 Tailscale 私网读取汇总。黑胶外观默认跟随系统。iPhone 可在小组件的 Parameter 填入 `light`、`dark` 或 `walnut` 固定外观。自动模式使用可随系统变化的底色、文字和图标，唱盘及图表使用两种外观共用的绘图配色。Mac 的三张卡片共享外观，可用以下命令更改，下一次刷新时应用。
 
 ```sh
 node mac/Widgets/set-finish.mjs dark

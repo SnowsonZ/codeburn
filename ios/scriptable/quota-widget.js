@@ -3,24 +3,36 @@
 const settings = null // Replaced when exporting the configured script.
 
 const requestedFinish = String(args.widgetParameter ?? '').trim().toLowerCase()
-const finish = ['light', 'dark', 'walnut'].includes(requestedFinish) ? requestedFinish
-  : requestedFinish === 'system' && Device.isUsingDarkAppearance() ? 'dark' : 'light'
+const fixedFinish = ['light', 'dark', 'walnut'].includes(requestedFinish) ? requestedFinish : null
+const automatic = !fixedFinish && config.runsInWidget
+// Device.isUsingDarkAppearance() is available in the Scriptable app, not on the Home Screen.
+const finish = fixedFinish ?? ((!config.runsInWidget && Device.isUsingDarkAppearance()) ? 'dark' : 'light')
 const light = finish === 'light'
 const walnut = finish === 'walnut'
-const stops = light ? [0xf6f4ef, 0xece8e0, 0xe3ded4]
-  : walnut ? [0x3c281d, 0x271a12, 0x1b120d] : [0x22201f, 0x161514, 0x100f0f]
-const palette = {
-  surface: new Color(light ? '#ece8e0' : walnut ? '#271a12' : '#161514'),
-  primary: new Color(light ? '#181614' : walnut ? '#faf2e6' : '#f6f1ea'),
-  secondary: new Color(light ? '#5b554e' : walnut ? '#c9b096' : '#a39a92'),
-  accent: new Color(light ? '#d14114' : walnut ? '#f68646' : '#f9671e'),
-  used: new Color(light ? '#b6a299' : '#634b41'),
-  cassetteWell: new Color(light ? '#ded0c2' : '#33251f'),
-  eject: new Color(light ? '#b51d44' : '#fb7185'),
-  rule: new Color(light ? '#c9c0b4' : '#50463e'),
-  well: new Color(light ? '#d3ccc0' : '#1a1614'),
-  badge: new Color(light ? '#e7e1d9' : '#39312c'),
+const chassisStops = {
+  light: [0xf6f4ef, 0xece8e0, 0xe3ded4],
+  dark: [0x22201f, 0x161514, 0x100f0f],
+  walnut: [0x3c281d, 0x271a12, 0x1b120d],
 }
+const finishes = {
+  light: {
+    surface:'#ece8e0', primary:'#181614', secondary:'#5b554e', accent:'#d14114',
+    used:'#b6a299', cassetteWell:'#ded0c2', eject:'#b51d44', rule:'#c9c0b4', well:'#d3ccc0', badge:'#e7e1d9',
+  },
+  dark: {
+    surface:'#161514', primary:'#f6f1ea', secondary:'#a39a92', accent:'#f9671e',
+    used:'#634b41', cassetteWell:'#33251f', eject:'#fb7185', rule:'#50463e', well:'#1a1614', badge:'#39312c',
+  },
+  walnut: {
+    surface:'#271a12', primary:'#faf2e6', secondary:'#c9b096', accent:'#f68646',
+    used:'#634b41', cassetteWell:'#33251f', eject:'#fb7185', rule:'#50463e', well:'#1a1614', badge:'#39312c',
+  },
+}
+const paint = Object.fromEntries(Object.entries(finishes[finish]).map(([role, hex]) => [role, new Color(hex)]))
+// Only native views resolve dynamic colors. Raster drawing uses a stable artwork palette.
+const palette = automatic ? Object.fromEntries(Object.keys(paint).map(role => [
+  role, Color.dynamic(paint[role], new Color(finishes.dark[role])),
+])) : paint
 const agentIds = ['codex', 'zcode', 'antigravity']
 const agentColors = ['#06b6d4', '#4387fb', '#d946ef']
 const coverColors = light ? ['#dcd4c8','#d2c9bc','#d9cdc0','#cfc4b4','#d7ccbe','#cec6ba']
@@ -182,11 +194,11 @@ function bar(parent, width, height, remaining, detailed) {
   const left = side / 2 + 3
   const right = width - left
   const centerY = height / 2
-  for (const [x, fraction, color] of [[left, remaining, tint], [right, 1 - remaining, palette.secondary]]) {
+  for (const [x, fraction, color] of [[left, remaining, paint.accent], [right, 1 - remaining, paint.secondary]]) {
     const radius = side * (0.20 + 0.27 * fraction)
     canvas.setFillColor(color)
     canvas.fillEllipse(new Rect(x - radius, centerY - radius, radius * 2, radius * 2))
-    canvas.setFillColor(palette.cassetteWell)
+    canvas.setFillColor(paint.cassetteWell)
     canvas.fillEllipse(new Rect(x - side * 0.19, centerY - side * 0.19, side * 0.38, side * 0.38))
     const spokes = new Path()
     for (let index = 0; index < 6; index++) {
@@ -201,11 +213,11 @@ function bar(parent, width, height, remaining, detailed) {
   }
   const start = left + side * 0.63 + 1
   const track = Math.max(1, width - 2 * start)
-  canvas.setFillColor(palette.used)
+  canvas.setFillColor(paint.used)
   canvas.fillRect(new Rect(start, centerY - 1.6, track, 3.2))
-  canvas.setFillColor(tint)
+  canvas.setFillColor(paint.accent)
   canvas.fillRect(new Rect(start, centerY - 1.6, track * remaining, 3.2))
-  canvas.setFillColor(palette.rule)
+  canvas.setFillColor(paint.rule)
   for (const part of [0.25, 0.5, 0.75]) canvas.fillRect(new Rect(start + track * part, centerY - 1.6, 0.55, 3.2))
   const image = view.addImage(canvas.getImage())
   image.imageSize = new Size(width, height)
@@ -436,6 +448,10 @@ async function readVinyl(usage) {
   }
 }
 
+function rgb(hex) {
+  return new Color('#' + hex.toString(16).padStart(6, '0'))
+}
+
 function colorAt(a, b, ratio) {
   const channels = [16, 8, 0].map(shift => {
     const start = (a >> shift) & 255
@@ -445,21 +461,25 @@ function colorAt(a, b, ratio) {
   return new Color('#' + channels.join(''))
 }
 
-function chassis(width, height, art, usage) {
+function chassis(width, height, art, usage, transparent = false) {
   const canvas = new DrawContext()
   canvas.size = new Size(width, height)
   canvas.respectScreenScale = true
-  const band = 4
-  for (let y = 0; y < height; y += band) {
-    const progress = (y / height) * 2
-    const left = Math.min(1, Math.floor(progress))
-    canvas.setFillColor(colorAt(stops[left], stops[left + 1], progress - left))
-    canvas.fillRect(new Rect(0, y, width, band))
+  canvas.opaque = !transparent
+  if (!transparent) {
+    const stops = chassisStops[finish]
+    const band = 4
+    for (let y = 0; y < height; y += band) {
+      const progress = (y / height) * 2
+      const left = Math.min(1, Math.floor(progress))
+      canvas.setFillColor(colorAt(stops[left], stops[left + 1], progress - left))
+      canvas.fillRect(new Rect(0, y, width, band))
+    }
+    canvas.setFillColor(new Color('#ffffff', light ? 0.34 : 0.025))
+    for (let x = 0; x < width; x += 3) canvas.fillRect(new Rect(x, 0, 0.7, height))
   }
-  canvas.setFillColor(new Color('#ffffff', light ? 0.34 : 0.025))
-  for (let x = 0; x < width; x += 3) canvas.fillRect(new Rect(x, 0, 0.7, height))
   if (art && usage) {
-    const side = Math.min(width, height)
+    const side = Math.min(width, height * (transparent ? 1.31 : 1))
     const left = width - side
     const scale = side / 222
     canvas.drawImageInRect(art, new Rect(left, height - side, side, side))
@@ -546,7 +566,7 @@ function sleeveImage(usage, width, height, axisHeight) {
   const column = (width - 6 * gap) / 7
   const base = new Path()
   base.addRoundedRect(new Rect(0, height, width, axisHeight), 2.5, 2.5)
-  canvas.setFillColor(palette.well)
+  canvas.setFillColor(paint.well)
   canvas.addPath(base)
   canvas.fillPath()
   const days = ['日', '一', '二', '三', '四', '五', '六']
@@ -561,17 +581,17 @@ function sleeveImage(usage, width, height, axisHeight) {
     if (value > 0) {
       const diskHeight = today ? Math.min(12, column * 0.7) : 2
       const left = x + column * 0.1
-      canvas.setFillColor(today ? new Color('#f78c47') : palette.well)
+      canvas.setFillColor(today ? new Color('#f78c47') : paint.well)
       canvas.fillEllipse(new Rect(left, y - diskHeight, column * 0.8, diskHeight * 2))
       if (today) {
         canvas.setFillColor(new Color('#ffd48b'))
         canvas.fillEllipse(new Rect(left + column * 0.23, y - diskHeight * 0.55, column * 0.34, diskHeight))
       }
     }
-    canvas.setFillColor(today ? palette.accent : new Color(coverColors[index % coverColors.length]))
+    canvas.setFillColor(today ? paint.accent : new Color(coverColors[index % coverColors.length]))
     canvas.fillRect(new Rect(x, y, column, coverHeight))
     if (coverHeight >= 14) {
-      canvas.setTextColor(today ? new Color('#ffeed2') : palette.primary)
+      canvas.setTextColor(today ? new Color('#ffeed2') : paint.primary)
       canvas.setFont(Font.semiboldMonospacedSystemFont(5.5))
       canvas.drawText(String(index + 1).padStart(2, '0'), new Point(x + 2, y + 2))
     }
@@ -591,7 +611,7 @@ function sleeveImage(usage, width, height, axisHeight) {
     }
     const weekday = days[new Date(row.day + 'T12:00:00').getDay()] ?? '—'
     canvas.setTextAlignedCenter()
-    canvas.setTextColor(today ? palette.accent : palette.primary)
+    canvas.setTextColor(today ? paint.accent : paint.primary)
     canvas.setFont(Font.semiboldSystemFont(7.2))
     canvas.drawTextInRect(weekday, new Rect(x, height + 0.25, column, axisHeight - 0.25))
     canvas.setTextAlignedLeft()
@@ -622,7 +642,17 @@ function vinylWidget(card, data, status, now, family, art) {
   const [width, height] = widgetSize(family)
   const contentWidth = width - 2 * inset
   widget.backgroundColor = palette.surface
-  widget.backgroundImage = chassis(width, height, card === 'today' ? art : null, data)
+  if (automatic) {
+    const gradient = new LinearGradient()
+    gradient.colors = chassisStops.light.map((hex, index) => Color.dynamic(
+      rgb(hex), rgb(chassisStops.dark[index])))
+    gradient.locations = [0, 0.56, 1]
+    gradient.startPoint = new Point(0, 0)
+    gradient.endPoint = new Point(0.7, 1)
+    widget.backgroundGradient = gradient
+  } else {
+    widget.backgroundImage = chassis(width, height, card === 'today' ? art : null, data)
+  }
 
   const header = slot(widget, 0, 18)
   text(header, {today:'今日用量', trend:'7 天趋势', quota:'套餐额度'}[card],
@@ -652,7 +682,17 @@ function vinylWidget(card, data, status, now, family, art) {
     text(widget, status ?? '等待数据同步', Font.mediumSystemFont(10), palette.secondary)
     widget.addSpacer()
   } else if (card === 'today') {
-    todayPanel(widget, data, family, contentWidth)
+    if (automatic && art) {
+      const panel = widget.addStack()
+      panel.layoutVertically()
+      panel.spacing = 0
+      const bodyHeight = height - 2 * inset - 18 - 4 - 13 - 5
+      panel.size = new Size(contentWidth, bodyHeight)
+      panel.backgroundImage = chassis(contentWidth, bodyHeight, art, data, true)
+      todayPanel(panel, data, family, contentWidth)
+    } else {
+      todayPanel(widget, data, family, contentWidth)
+    }
   } else if (card === 'trend') {
     trendPanel(widget, data, family, contentWidth, height)
   } else if (family === 'small') {
