@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { setTimeout as delay } from 'node:timers/promises'
 
 const target = process.argv[2]
 if (!/^https:\/\/[a-z0-9][a-z0-9.-]*\.ts\.net(?::[1-9][0-9]{0,4})?\/?$/.test(target ?? '')) {
@@ -64,8 +65,14 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
 await mkdir(agents, { recursive: true })
 await writeFile(plist, xml, { mode: 0o600 })
 const launchctl = (args, options = { stdio: 'inherit' }) => execFileSync('/bin/launchctl', args, options)
-if (spawnSync('/bin/launchctl', ['print', `${domain}/${label}`]).status === 0) {
-  launchctl(['bootout', `${domain}/${label}`])
+const service = `${domain}/${label}`
+const loaded = () => spawnSync('/bin/launchctl', ['print', service]).status === 0
+if (loaded()) {
+  launchctl(['bootout', service])
+  // launchd can return from bootout before the old registration is removed.
+  const deadline = Date.now() + 5000
+  while (Date.now() < deadline && loaded()) await delay(100)
+  if (loaded()) throw new Error('The previous CodeBurn widget bridge is still unloading')
 }
 launchctl(['bootstrap', domain, plist])
 console.log(scriptFiles.join('\n'))
