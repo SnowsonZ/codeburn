@@ -485,7 +485,7 @@ private struct WidgetCard: View {
                                 if row.id == .antigravity {
                                     Rectangle().fill(Color.secondary.opacity(0.26)).frame(width: 1, height: 10)
                                         .accessibilityHidden(true)
-                                    modelIcon(window.modelGroup)
+                                    modelIcon(window.modelGroup, size: quotaIconSize)
                                 }
                                 Spacer(minLength: 0)
                                 if row.id == .antigravity {
@@ -540,12 +540,12 @@ private struct WidgetCard: View {
                 ForEach(models.prefix(limit)) { model in
                     if let standalone = model.standalone {
                         GridRow {
-                            quotaIconCell(modelIcon(model.group))
+                            modelQuotaIconCell(model.group)
                             quotaCell(standalone).gridCellColumns(2)
                         }
                     } else {
                         GridRow {
-                            quotaIconCell(modelIcon(model.group))
+                            modelQuotaIconCell(model.group)
                             quotaCell(model.fiveHours, period: .fiveHours)
                             quotaCell(model.weekly, period: .weekly)
                         }
@@ -584,6 +584,10 @@ private struct WidgetCard: View {
         icon.frame(width: quotaIdentityWidth, height: quotaRowHeight, alignment: .leading)
     }
 
+    private func modelQuotaIconCell(_ group: String) -> some View {
+        quotaIconCell(modelIcon(group, size: quotaIconSize - 3).padding(.leading, large ? 9 : 7))
+    }
+
     private func periodLabel(_ period: QuotaPeriod) -> some View {
         Text(period.title)
             .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
@@ -591,12 +595,12 @@ private struct WidgetCard: View {
     }
 
     private func harnessIcon(_ agent: Agent) -> some View {
-        quotaLogo("provider-" + agent.rawValue, fallback: "terminal")
+        quotaLogo("provider-" + agent.rawValue, fallback: "terminal", size: quotaIconSize)
             .accessibilityLabel(agent.name)
             .help(agent.name)
     }
 
-    private func modelIcon(_ group: String) -> some View {
+    private func modelIcon(_ group: String, size: CGFloat) -> some View {
         let name = group.lowercased()
         let claude = name.contains("claude")
         let gpt = name.contains("gpt")
@@ -604,22 +608,22 @@ private struct WidgetCard: View {
         return HStack(spacing: quotaIconGap) {
             Group {
                 if claude {
-                    quotaLogo("provider-claude", fallback: "sun.max")
+                    quotaLogo("provider-claude", fallback: "sun.max", size: size)
                 } else if gpt {
-                    quotaLogo("provider-codex", fallback: "circle.hexagongrid")
+                    quotaLogo("provider-codex", fallback: "circle.hexagongrid", size: size)
                 } else if gemini {
-                    quotaLogo("provider-gemini", fallback: "sparkle")
+                    quotaLogo("provider-gemini", fallback: "sparkle", size: size)
                 } else {
-                    Image(systemName: "cpu").font(.system(size: quotaIconSize))
+                    Image(systemName: "cpu").font(.system(size: size))
                 }
             }
-            .frame(width: quotaIconSize, height: quotaIconSize)
+            .frame(width: size, height: size)
             Group {
                 if claude && gpt {
-                    quotaLogo("provider-codex", fallback: "circle.hexagongrid")
+                    quotaLogo("provider-codex", fallback: "circle.hexagongrid", size: size)
                 } else if gemini && name.contains("argon") {
                     Text("Ar")
-                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                        .font(.system(size: min(8, size * 0.7), weight: .semibold, design: .monospaced))
                         .fixedSize()
                         .padding(.horizontal, large ? 2 : 1).padding(.vertical, 1)
                         .background(Color.secondary.opacity(0.2), in: RoundedRectangle(cornerRadius: 3))
@@ -627,7 +631,7 @@ private struct WidgetCard: View {
                     Color.clear
                 }
             }
-            .frame(width: quotaIconSize, height: quotaIconSize)
+            .frame(width: size, height: size)
         }
         .foregroundStyle(.secondary)
         .accessibilityElement(children: .ignore)
@@ -636,16 +640,16 @@ private struct WidgetCard: View {
     }
 
     @ViewBuilder
-    private func quotaLogo(_ name: String, fallback: String) -> some View {
+    private func quotaLogo(_ name: String, fallback: String, size: CGFloat) -> some View {
         if let url = Bundle.main.url(forResource: name, withExtension: "svg"),
            let image = NSImage(contentsOf: url) {
             Image(nsImage: image).renderingMode(.template).resizable().scaledToFit()
-                .frame(width: quotaIconSize, height: quotaIconSize)
+                .frame(width: size, height: size)
                 .scaleEffect(name == "provider-zcode" ? 1.3 : 1)
                 .foregroundStyle(.primary)
         } else {
-            Image(systemName: fallback).font(.system(size: quotaIconSize))
-                .frame(width: quotaIconSize, height: quotaIconSize)
+            Image(systemName: fallback).font(.system(size: size))
+                .frame(width: size, height: size)
         }
     }
 
