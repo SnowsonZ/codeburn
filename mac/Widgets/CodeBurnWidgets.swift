@@ -1,3 +1,4 @@
+import AppIntents
 import AppKit
 import Foundation
 import SwiftUI
@@ -20,9 +21,9 @@ private enum Agent: String, Decodable, CaseIterable {
 
     var color: Color {
         switch self {
-        case .codex: .teal
-        case .zcode: .blue
-        case .antigravity: .purple
+        case .codex: Color(rgb: 0x06b6d4)
+        case .zcode: Color(rgb: 0x4387fb)
+        case .antigravity: Color(rgb: 0xd946ef)
         }
     }
 }
@@ -32,6 +33,11 @@ private struct UsageAgent: Decodable {
     let tokens: Int?
     let input: Int?
     let cached: Int?
+
+    var cacheRate: Double? {
+        guard let input, let cached, input > 0, cached >= 0, cached <= input else { return nil }
+        return Double(cached) / Double(input)
+    }
 }
 
 private struct UsageDay: Decodable, Identifiable {
@@ -271,22 +277,92 @@ private enum Card: String {
     }
 }
 
+enum VinylFinish: String, AppEnum {
+    case silver, dark, walnut, system
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Finish"
+    static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
+        .silver: "银白", .dark: "深夜", .walnut: "胡桃木", .system: "跟随系统",
+    ]
+
+    var assets: String {
+        switch self {
+        case .silver, .system: "light"
+        case .dark: "dark"
+        case .walnut: "walnut"
+        }
+    }
+
+    var light: Bool { self == .silver }
+
+    var chassis: [Color] {
+        switch self {
+        case .silver, .system: [Color(rgb: 0xf6f4ef), Color(rgb: 0xece8e0), Color(rgb: 0xe3ded4)]
+        case .dark: [Color(rgb: 0x22201f), Color(rgb: 0x161514), Color(rgb: 0x100f0f)]
+        case .walnut: [Color(rgb: 0x3c281d), Color(rgb: 0x271a12), Color(rgb: 0x1b120d)]
+        }
+    }
+
+    var ink: Color {
+        light ? Color(rgb: 0x181614) : self == .walnut ? Color(rgb: 0xfaf2e6) : Color(rgb: 0xf6f1ea)
+    }
+
+    var subtitle: Color {
+        light ? Color(rgb: 0x5b554e) : self == .walnut ? Color(rgb: 0xc9b096) : Color(rgb: 0xa39a92)
+    }
+
+    var orange: Color {
+        light ? Color(rgb: 0xd14114) : self == .walnut ? Color(rgb: 0xf68646) : Color(rgb: 0xf9671e)
+    }
+
+    var tape: Color { light ? Color(rgb: 0x0d9668) : self == .walnut ? Color(rgb: 0x34d399) : Color(rgb: 0x10b981) }
+    var lowTape: Color { light ? Color(rgb: 0xd97706) : self == .walnut ? Color(rgb: 0xfbbf24) : Color(rgb: 0xf59e0b) }
+    var eject: Color { light ? Color(rgb: 0xb51d44) : Color(rgb: 0xfb7185) }
+    var well: Color { light ? Color(rgb: 0xcec7bc).opacity(0.7) : Color.black.opacity(0.5) }
+
+    var sleeves: [(UInt32, UInt32)] {
+        switch self {
+        case .silver, .system: [(0xdcd4c8, 0x9e8f7e), (0xd2c9bc, 0x6f7c85), (0xd9cdc0, 0xb87f62),
+                               (0xcfc4b4, 0x566b65), (0xd7ccbe, 0x8f7b6a), (0xcec6ba, 0x6c6862)]
+        case .dark: [(0x342f2c, 0x6f8594), (0x2c2826, 0x9c785c), (0x38312c, 0xb86846),
+                     (0x40362f, 0xc99749), (0x322d2a, 0x5f8a7a), (0x2b2725, 0x7d756e)]
+        case .walnut: [(0x523a2c, 0xb8845c), (0x483327, 0x6c858c), (0x5b4030, 0xc97b55),
+                       (0x644533, 0xd4a359), (0x50392c, 0x7a9483), (0x443025, 0x9e8470)]
+        }
+    }
+
+    var crate: [Color] {
+        switch self {
+        case .silver, .system: [Color(rgb: 0xd3c8b9), Color(rgb: 0xa69682)]
+        case .dark: [Color(rgb: 0x3f352e), Color(rgb: 0x1e1916)]
+        case .walnut: [Color(rgb: 0x734d33), Color(rgb: 0x3b2416)]
+        }
+    }
+}
+
+struct VinylSettings: WidgetConfigurationIntent {
+    static var title: LocalizedStringResource = "CodeBurn 外观"
+    @Parameter(title: "外观", default: .silver) var finish: VinylFinish
+}
+
 private struct Entry: TimelineEntry {
     let date: Date
     let snapshot: Snapshot?
+    var finish: VinylFinish = .silver
 }
 
-private struct SnapshotProvider: TimelineProvider {
+private struct SnapshotProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> Entry {
         let now = Date()
         return .init(date: now, snapshot: .sample(now: now))
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (Entry) -> Void) {
-        completion(context.isPreview ? placeholder(in: context) : .init(date: Date(), snapshot: .load()))
+    func snapshot(for configuration: VinylSettings, in context: Context) async -> Entry {
+        let now = Date()
+        return .init(date: now, snapshot: context.isPreview ? .sample(now: now) : .load(), finish: configuration.finish)
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> Void) {
+    func timeline(for configuration: VinylSettings, in context: Context) async -> Timeline<Entry> {
         let now = Date()
         let snapshot = Snapshot.load()
         let windows = snapshot?.quota?.agents.flatMap(\.windows) ?? []
@@ -295,7 +371,7 @@ private struct SnapshotProvider: TimelineProvider {
         let midnight = civilCalendar.nextDate(after: now, matching: .init(hour: 0, minute: 0), matchingPolicy: .nextTime)
         let reset = windows.compactMap { parseDate($0.resetsAt) }.filter { $0 > now }.min()
         let next = min(now.addingTimeInterval(interval), midnight ?? .distantFuture, reset ?? .distantFuture)
-        completion(Timeline(entries: [.init(date: now, snapshot: snapshot)], policy: .after(next)))
+        return Timeline(entries: [.init(date: now, snapshot: snapshot, finish: configuration.finish)], policy: .after(next))
     }
 }
 
@@ -318,7 +394,6 @@ private struct QuotaGridMetrics {
     }
 
     var valueSize: CGFloat { rowHeight >= 28 ? 16 : rowHeight >= 18 ? 13 : 10.5 }
-    var barHeight: CGFloat { rowHeight >= 28 ? 7 : rowHeight >= 18 ? 6 : 4 }
     var valueWidth: CGFloat { ceil(valueSize * 2.5 + 2) }
 }
 
@@ -331,70 +406,93 @@ private struct WidgetCard: View {
 
     private var wide: Bool { family != .systemSmall }
     private var large: Bool { family == .systemLarge }
-    private var dark: Bool { colorScheme == .dark }
-    private var cardColor: Color { Color(rgb: dark ? 0x222224 : 0xffffff) }
-    private var panelColor: Color { Color(rgb: dark ? 0x2e2e31 : 0xf5f6f7) }
-    private var secondaryColor: Color { Color(rgb: dark ? 0xb2b2b9 : 0x62646b) }
-    private var ruleColor: Color { Color(rgb: dark ? 0x46464b : 0xe2e2e6) }
-    private var remainingColor: Color { Color(rgb: 0x4bb978) }
-    private var usedColor: Color { Color(rgb: dark ? 0x77777c : 0xb1b1b3) }
-    private var iconColor: Color {
-        switch card {
-        case .today: Color(rgb: dark ? 0xffb090 : 0xa74624)
-        case .trend: Color(rgb: dark ? 0xaac7ff : 0x365b9b)
-        case .quota: Color(rgb: dark ? 0x8fd9ac : 0x287a51)
-        }
-    }
-    private var iconTileColor: Color {
-        switch card {
-        case .today: Color(rgb: dark ? 0x4b342c : 0xfaede6)
-        case .trend: Color(rgb: dark ? 0x2d3b56 : 0xe9effb)
-        case .quota: Color(rgb: dark ? 0x294137 : 0xe7f3eb)
-        }
-    }
-    private var quotaIconSize: CGFloat { large ? 18 : (wide ? 12 : 13) }
+    private var finish: VinylFinish { entry.finish == .system ? (colorScheme == .dark ? .dark : .silver) : entry.finish }
+    private var secondaryColor: Color { finish.subtitle }
+    private var ruleColor: Color { finish.ink.opacity(finish.light ? 0.16 : 0.18) }
+    private var remainingColor: Color { finish.tape }
+    private var quotaIconSize: CGFloat { large ? 17 : 12 }
     private let quotaIconGap: CGFloat = 4
-    private var quotaIdentityWidth: CGFloat { large ? 50 : 36 }
-    private var updateAnimation: Animation? { reduceMotion ? nil : .easeInOut(duration: 0.28) }
+    private var quotaIdentityWidth: CGFloat { large ? 43 : 33 }
+    private var inset: CGFloat { wide ? 14 : 11 }
+    private var updateAnimation: Animation? { reduceMotion ? nil : .easeOut(duration: 0.32) }
+    private var usage: UsageSnapshot? {
+        guard let snapshot = entry.snapshot?.usage, snapshot.day == dayKey(entry.date) else { return nil }
+        return snapshot
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: large ? 9 : 5) {
             header
-            panelContent
-                .padding(.horizontal, large ? 10 : 7)
-                .padding(.vertical, large ? 8 : 4)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(panelColor, in: RoundedRectangle(cornerRadius: large ? 15 : 10))
-                .padding(.top, large ? 11 : 4)
+            panelContent.frame(maxWidth: .infinity, maxHeight: .infinity)
             refreshTime
-                .padding(.top, large ? 9 : 4)
         }
+        .foregroundStyle(finish.ink)
+        .padding(inset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .containerBackground(for: .widget) { cardColor }
+        .background(alignment: .bottomTrailing) {
+            if card == .today, let usage { platter(usage) }
+        }
+        .containerBackground(for: .widget) { chassis }
+    }
+
+    private var chassis: some View {
+        LinearGradient(colors: finish.chassis, startPoint: .topLeading, endPoint: .bottomTrailing)
+            .overlay {
+                Canvas { context, size in
+                    var path = Path()
+                    for x in stride(from: 0.0, to: size.width, by: 3) {
+                        path.move(to: .init(x: x, y: 0))
+                        path.addLine(to: .init(x: x, y: size.height))
+                    }
+                    context.stroke(path, with: .color(.white.opacity(finish.light ? 0.34 : 0.033)), lineWidth: 0.65)
+                }
+            }
+            .accessibilityHidden(true)
     }
 
     private var header: some View {
-        let tile: CGFloat = large ? 28 : 20
-        return HStack(spacing: large ? 8 : 6) {
-            Image(systemName: card.symbol)
-                .font(.system(size: large ? 16 : 11, weight: .semibold))
-                .foregroundStyle(iconColor)
-                .frame(width: tile, height: tile)
-                .background(iconTileColor, in: RoundedRectangle(cornerRadius: large ? 8 : 6))
-                .accessibilityHidden(true)
+        HStack(spacing: 5) {
+            if card == .today {
+                Circle().fill(finish.orange).frame(width: 4.5, height: 4.5).accessibilityHidden(true)
+            }
             Text(card.title)
-                .font(.system(size: large ? 17 : 13, weight: .semibold))
-                .lineLimit(1).minimumScaleFactor(0.75)
+                .font(.system(size: large ? 15 : 11.5, weight: .bold))
+                .foregroundStyle(card == .quota ? finish.ink : finish.orange)
+                .lineLimit(1).layoutPriority(1)
                 .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 3)
+            if card == .quota && wide {
+                Text("DUAL CASSETTE DECK")
+                    .font(.system(size: large ? 8 : 6.5, weight: .medium, design: .monospaced))
+                    .tracking(0.6).foregroundStyle(secondaryColor).lineLimit(1)
+                    .accessibilityHidden(true)
+            }
+            Spacer(minLength: 1)
             if card == .quota {
                 HStack(spacing: 4) {
-                    Circle().fill(remainingColor).frame(width: 5, height: 5).accessibilityHidden(true)
+                    Circle().fill(remainingColor).frame(width: 4, height: 4).accessibilityHidden(true)
                     Text(copy("剩余", "Remaining"))
                 }
-                .font(.system(size: large ? 11 : 9, weight: .medium))
+                .font(.system(size: large ? 10 : 8.5, weight: .medium))
                 .foregroundStyle(secondaryColor)
                 .lineLimit(1).minimumScaleFactor(0.8)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(finish.well, in: Capsule())
+            } else if card == .trend {
+                Text("LP CRATE").font(.system(size: 7, design: .monospaced))
+                    .tracking(0.6).foregroundStyle(secondaryColor).accessibilityHidden(true)
+            } else if let rate = usage?.cacheRate {
+                HStack(spacing: 3) {
+                    Circle().fill(rate >= 0.9 ? finish.tape : finish.lowTape).frame(width: 4, height: 4)
+                    Text(percent(rate)).monospacedDigit().contentTransition(reduceMotion ? .identity : .numericText(value: rate * 100))
+                    Text(rate >= 0.9 ? "LOCK" : "DRIFT")
+                }
+                .font(.system(size: 7, weight: .semibold, design: .monospaced))
+                .padding(.horizontal, 5).padding(.vertical, 3)
+                .background(finish.well, in: Capsule())
+                .overlay(Capsule().strokeBorder(ruleColor, lineWidth: 0.6))
+                .animation(updateAnimation, value: rate)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(copy("缓存命中率", "Cache hit rate") + " " + percent(rate))
             }
         }
     }
@@ -442,116 +540,168 @@ private struct WidgetCard: View {
     }
 
     private func today(_ usage: UsageSnapshot) -> some View {
-        let agents = usage.rankedAgents
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 4) {
-                if wide {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        usageTotal(usage.total)
-                        tokenUnit
+        VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
+                usageTotal(usage.total)
+                Text("Token" + (usage.cacheRate.map { " · " + copy("缓存", "Cache") + " " + percent($0) } ?? ""))
+                    .font(.system(size: 8, weight: .medium, design: .monospaced)).foregroundStyle(secondaryColor)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: 0)
+            GeometryReader { geometry in
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(usage.rankedAgents, id: \.id) { row in
+                        HStack(spacing: 4) {
+                            quotaLogo("provider-" + row.id.rawValue, fallback: "terminal", size: 10)
+                                .foregroundStyle(row.id.color)
+                            if !wide { Spacer(minLength: 2) }
+                            Text(compact(row.tokens)).minimumScaleFactor(0.72)
+                            if wide, let rate = row.cacheRate {
+                                Text(percent(rate)).foregroundStyle(secondaryColor)
+                            }
+                        }
+                        .font(.system(size: wide ? 10 : 9, weight: .semibold, design: .monospaced))
+                        .monospacedDigit().lineLimit(1)
+                        .frame(width: wide ? min(geometry.size.width, 150) : geometry.size.width * 0.48, alignment: .leading)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(row.id.name + " " + compact(row.tokens) + " Token"
+                            + (row.cacheRate.map { " · " + copy("缓存命中", "Cache hit") + " " + percent($0) } ?? ""))
                     }
-                } else {
-                    VStack(alignment: .leading, spacing: 0) {
-                        usageTotal(usage.total)
-                        tokenUnit
-                    }
-                }
-                Spacer(minLength: 2)
-                if let rate = usage.cacheRate {
-                    VStack(alignment: .trailing, spacing: 0) {
-                        Text(percent(rate))
-                            .font(.system(size: wide ? 16 : 14, weight: .semibold))
-                            .monospacedDigit().lineLimit(1)
-                            .contentTransition(reduceMotion ? .identity : .numericText(value: rate * 100))
-                            .animation(updateAnimation, value: rate)
-                        Text(copy("缓存命中", "Cache hit"))
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(secondaryColor)
-                            .lineLimit(1)
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(copy("缓存命中率", "Cache hit rate") + " " + percent(rate))
                 }
             }
-            if !agents.isEmpty {
-                Spacer(minLength: 3)
-                ForEach(agents, id: \.id) { row in
-                    HStack(spacing: 4) {
-                        quotaLogo("provider-" + row.id.rawValue, fallback: "terminal", size: wide ? 10 : 9)
-                            .accessibilityHidden(true)
-                        Text(row.id.name).lineLimit(1).minimumScaleFactor(0.78)
-                        Spacer(minLength: 2)
-                        Text(compact(row.tokens)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.78)
-                            .layoutPriority(1)
-                        if wide {
-                            Group {
-                                if let input = row.input, input > 0, let cached = row.cached {
-                                    let hit = percent(Double(cached) / Double(input))
-                                    Text(hit).accessibilityLabel(copy("缓存命中", "Cache hit") + " " + hit)
-                                } else {
-                                    Color.clear.accessibilityHidden(true)
-                                }
-                            }
-                            .foregroundStyle(secondaryColor)
-                            .frame(width: 37, height: 12, alignment: .trailing)
+            .frame(height: CGFloat(max(1, usage.rankedAgents.count)) * 13)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func platter(_ usage: UsageSnapshot) -> some View {
+        let groove = max(2, min(36, Int((36 * min(1, Double(usage.total ?? 0) / 1_000_000_000)).rounded())))
+        let imageURL = Bundle.main.url(forResource: finish.assets + "-\(groove)", withExtension: "png", subdirectory: "Vinyl")
+        let image = imageURL.flatMap(NSImage.init(contentsOf:))
+        return GeometryReader { geometry in
+            let size = min(geometry.size.width, geometry.size.height)
+            let scale = size / 222
+            let total = Double(usage.total ?? 0)
+            ZStack(alignment: .topLeading) {
+                if let image {
+                    Image(nsImage: image).resizable().interpolation(.high)
+                        .id(groove).transition(reduceMotion ? .identity : .opacity)
+                }
+                Canvas { context, _ in
+                    guard total > 0 else { return }
+                    var offset = -90.0
+                    for agent in Agent.allCases {
+                        let tokens = Double(usage.agents.first { $0.id == agent }?.tokens ?? 0)
+                        let amount = 360 * tokens / total
+                        if amount > 0 {
+                            var path = Path()
+                            path.addArc(center: .init(x: 178 * scale, y: 168 * scale), radius: 22.6 * scale,
+                                        startAngle: .degrees(offset), endAngle: .degrees(offset + amount), clockwise: false)
+                            context.stroke(path, with: .color(agent.color), lineWidth: max(1, 2.4 * scale))
+                            offset += amount
                         }
                     }
-                    .font(.system(size: wide ? 11 : 10, weight: .medium))
-                    if row.id != agents.last?.id { Spacer(minLength: 2) }
                 }
-            } else {
-                Spacer(minLength: 0)
             }
+            .frame(width: size, height: size)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            .animation(updateAnimation, value: groove)
         }
+        .accessibilityHidden(true)
     }
 
     private func usageTotal(_ total: Int?) -> some View {
         Text(compact(total))
-            .font(.system(size: wide ? 27 : 23, weight: .semibold, design: .rounded))
-            .monospacedDigit().lineLimit(1).minimumScaleFactor(0.62)
+            .font(.system(size: wide ? 30 : 26, weight: .black))
+            .tracking(-0.75).monospacedDigit().lineLimit(1).minimumScaleFactor(0.62)
             .contentTransition(reduceMotion ? .identity : .numericText())
             .animation(updateAnimation, value: total)
     }
 
-    private var tokenUnit: some View {
-        Text("Token")
-            .font(.system(size: 9, weight: .medium))
-            .foregroundStyle(secondaryColor)
-    }
-
     private func trend(_ usage: UsageSnapshot) -> some View {
         let maximum = max(1, usage.days.compactMap(\.tokens).max() ?? 0)
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
+        let peakId = usage.days.first { ($0.tokens ?? 0) == maximum }?.id
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
                 usageTotal(sum(usage.days.map(\.tokens)))
-                tokenUnit
+                Text("Token").font(.system(size: 9, weight: .medium)).foregroundStyle(secondaryColor)
             }
             GeometryReader { geometry in
-                let chartHeight = max(0, geometry.size.height - 14)
-                HStack(alignment: .bottom, spacing: wide ? 8 : 4) {
-                    ForEach(usage.days) { row in
-                        let isToday = row.day == usage.day
-                        let ratio = CGFloat(row.tokens ?? 0) / CGFloat(maximum)
-                        VStack(spacing: 3) {
-                            Spacer(minLength: 0)
-                            UnevenRoundedRectangle(topLeadingRadius: 3, topTrailingRadius: 3)
-                                .fill(iconColor.opacity(isToday ? 0.9 : 0.33))
-                                .frame(height: row.tokens == nil ? 0 : max(2, chartHeight * ratio))
-                                .animation(updateAnimation, value: ratio)
-                            Text(parseDay(row.day)?.formatted(.dateTime.weekday(.narrow)) ?? "—")
-                                .font(.system(size: 9, weight: isToday ? .semibold : .regular))
-                                .foregroundStyle(isToday ? iconColor : secondaryColor)
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(row.day + ", " + compact(row.tokens) + " Token")
+                HStack(alignment: .bottom, spacing: wide ? 7 : 3.5) {
+                    ForEach(Array(usage.days.enumerated()), id: \.element.id) { index, row in
+                        sleeve(row, index: index, maximum: maximum, height: geometry.size.height,
+                               today: row.day == usage.day, peak: peakId == row.id)
                     }
                 }
+                .padding(.horizontal, 2)
                 .frame(maxHeight: .infinity, alignment: .bottom)
             }
+            HStack(spacing: 0) {
+                ForEach(usage.days) { row in
+                    Text(parseDay(row.day)?.formatted(.dateTime.weekday(.narrow)) ?? "—")
+                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(row.day == usage.day ? finish.orange : finish.ink)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.vertical, 2)
+            .background(LinearGradient(colors: finish.crate, startPoint: .top, endPoint: .bottom),
+                        in: RoundedRectangle(cornerRadius: 3))
+            .accessibilityHidden(true)
         }
+    }
+
+    private func sleeve(_ day: UsageDay, index: Int, maximum: Int, height: CGFloat, today: Bool, peak: Bool) -> some View {
+        let palette = finish.sleeves[index % finish.sleeves.count]
+        let ratio = CGFloat(day.tokens ?? 0) / CGFloat(maximum)
+        let diskHeight: CGFloat = today ? 9 : 2
+        let maxCover = max(1, height - diskHeight - 9)
+        return VStack(spacing: 0) {
+            if peak && !today {
+                Text(copy("峰值", "PEAK")).font(.system(size: 5.5, weight: .black, design: .monospaced))
+                    .foregroundStyle(Color(rgb: 0x251911))
+                    .padding(.horizontal, 2).padding(.vertical, 0.65)
+                    .background(Color(rgb: 0xf8cc6a), in: RoundedRectangle(cornerRadius: 2))
+            }
+            if day.tokens != nil && ratio > 0 {
+                ZStack {
+                    UnevenRoundedRectangle(topLeadingRadius: 8, topTrailingRadius: 8)
+                        .fill(today ? LinearGradient(colors: [Color(rgb: 0xffe5ab), finish.orange],
+                                                     startPoint: .top, endPoint: .bottom)
+                                    : LinearGradient(colors: [.black.opacity(0.65), .black.opacity(0.65)],
+                                                     startPoint: .top, endPoint: .bottom))
+                    if today { Capsule().strokeBorder(.white.opacity(0.28), lineWidth: 0.5).padding(1.5) }
+                }
+                .frame(height: diskHeight)
+                .transition(.offset(y: 4).combined(with: .opacity))
+            }
+            if let value = day.tokens {
+                let coverHeight = value == 0 ? 1 : max(2, maxCover * ratio)
+                UnevenRoundedRectangle(topLeadingRadius: 2.5, topTrailingRadius: 2.5)
+                    .fill(today ? finish.orange : Color(rgb: palette.0))
+                    .overlay(alignment: .top) {
+                        if coverHeight >= 13 {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(String(format: "%02d", index + 1)).font(.system(size: 5.5, weight: .bold, design: .monospaced))
+                                if coverHeight >= 24 {
+                                    Image(systemName: ["rectangle.fill", "circle.fill", "diamond.fill"][index % 3])
+                                        .font(.system(size: 4.5)).foregroundStyle(today ? Color(rgb: 0xffd883) : Color(rgb: palette.1))
+                                }
+                            }
+                            .foregroundStyle(today ? Color(rgb: 0xffeed2) : finish.ink.opacity(0.76)).padding(.top, 2)
+                        }
+                    }
+                    .overlay { UnevenRoundedRectangle(topLeadingRadius: 2.5, topTrailingRadius: 2.5).strokeBorder(ruleColor, lineWidth: 0.55) }
+                    .frame(height: coverHeight)
+            } else {
+                Rectangle().fill(ruleColor).frame(height: 1)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .animation(updateAnimation, value: ratio)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(day.day + ", " + compact(day.tokens) + " Token")
     }
 
     @ViewBuilder
@@ -580,7 +730,7 @@ private struct WidgetCard: View {
                                 } else if let period = window.accountPeriod {
                                     periodLabel(period)
                                 } else {
-                                    Text(window.name).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                                    Text(window.name).font(.system(size: 9)).foregroundStyle(secondaryColor).lineLimit(1)
                                 }
                                 if active {
                                     remainingValue(window)
@@ -715,7 +865,7 @@ private struct WidgetCard: View {
                 let title = copy("显示上次取得的额度", "Showing last known quota")
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: large ? 10 : 8))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(secondaryColor)
                     .accessibilityLabel(title)
                     .help(title)
             }
@@ -724,7 +874,12 @@ private struct WidgetCard: View {
     }
 
     private func modelQuotaIconCell(_ group: String, height: CGFloat) -> some View {
-        quotaIconCell(modelIcon(group, size: quotaIconSize - 3).padding(.leading, large ? 9 : 7), height: height)
+        quotaIconCell(
+            HStack(spacing: 4) {
+                Rectangle().fill(ruleColor).frame(width: 1, height: height).accessibilityHidden(true)
+                modelIcon(group, size: quotaIconSize - 2)
+            }
+            .padding(.leading, 6), height: height)
     }
 
     private func periodLabel(_ period: QuotaPeriod) -> some View {
@@ -772,7 +927,7 @@ private struct WidgetCard: View {
             }
             .frame(width: size, height: size)
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(finish.ink)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(group)
         .help(group)
@@ -785,7 +940,7 @@ private struct WidgetCard: View {
             Image(nsImage: image).renderingMode(.template).resizable().scaledToFit()
                 .frame(width: size, height: size)
                 .scaleEffect(name == "provider-zcode" ? 1.3 : 1)
-                .foregroundStyle(.primary)
+
         } else {
             Image(systemName: fallback).font(.system(size: size))
                 .frame(width: size, height: size)
@@ -804,7 +959,7 @@ private struct WidgetCard: View {
     private func pendingQuotaValue(_ label: String) -> some View {
         Text(copy("待更新", "Pending"))
             .font(.system(size: large ? 12 : 10, weight: .medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(secondaryColor)
             .lineLimit(1)
             .accessibilityLabel(label + " " + copy("已到重置时间，等待额度更新", "reset reached; waiting for updated quota"))
     }
@@ -813,10 +968,10 @@ private struct WidgetCard: View {
     private func quotaCell(_ window: QuotaWindow?, metrics: QuotaGridMetrics, period: QuotaPeriod? = nil) -> some View {
         if let window, window.isActive(at: entry.date) {
             HStack(spacing: large ? 7 : 4) {
-                quotaBar(window, height: metrics.barHeight)
-                remainingValue(window).frame(width: metrics.valueWidth, alignment: .trailing)
+                cassette(window, height: min(large ? 20 : 13, metrics.rowHeight))
+                remainingValue(window).frame(width: large ? metrics.valueWidth : 32, alignment: .trailing)
             }
-            .font(.system(size: metrics.valueSize, weight: .semibold))
+            .font(.system(size: metrics.valueSize, weight: .semibold, design: .monospaced))
             .frame(height: metrics.rowHeight)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel((period?.title ?? window.name) + " " + copy("剩余", "Remaining") + " " + percent(window.remaining))
@@ -831,15 +986,75 @@ private struct WidgetCard: View {
         }
     }
 
-    private func quotaBar(_ window: QuotaWindow, height: CGFloat = 4) -> some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .trailing) {
-                Capsule().fill(usedColor)
-                Rectangle().fill(remainingColor)
-                    .frame(width: geometry.size.width * window.remaining)
-                    .animation(updateAnimation, value: window.remaining)
+    private func cassette(_ window: QuotaWindow, height: CGFloat) -> some View {
+        let proportion = window.remaining
+        let tint = proportion <= 0.25 ? finish.lowTape : finish.tape
+        return GeometryReader { geometry in
+            let spoolSize = min(geometry.size.height - 2, geometry.size.width * 0.21)
+            ZStack {
+                RoundedRectangle(cornerRadius: 3).fill(finish.well)
+                RoundedRectangle(cornerRadius: 3).strokeBorder(proportion == 0 ? finish.eject.opacity(0.64) : ruleColor, lineWidth: 0.7)
+                if proportion == 0 {
+                    Text(copy("耗尽", "EJECT")).font(.system(size: height > 14 ? 8 : 6.5, weight: .bold, design: .monospaced))
+                        .tracking(0.55).foregroundStyle(finish.eject)
+                } else {
+                    HStack(spacing: 2) {
+                        if spoolSize >= 5 {
+                            spool(remaining: proportion, tint: tint, side: spoolSize)
+                        }
+                        tapeProgress(proportion, tint: tint, height: min(6, height * 0.36), ticks: true)
+                        if spoolSize >= 5 {
+                            spool(remaining: 1 - proportion, tint: secondaryColor.opacity(0.65), side: spoolSize)
+                        }
+                    }
+                    .padding(.horizontal, 3)
+                }
             }
-            .clipShape(Capsule())
+            .animation(updateAnimation, value: proportion)
+        }
+        .frame(height: height)
+        .accessibilityHidden(true)
+    }
+
+    private func spool(remaining: Double, tint: Color, side: CGFloat) -> some View {
+        let diameter = side * (0.4 + 0.54 * remaining)
+        return ZStack {
+            Circle().fill(tint.opacity(0.28)).frame(width: diameter, height: diameter)
+            Circle().strokeBorder(tint.opacity(0.8), lineWidth: 0.75)
+                .frame(width: side * 0.41, height: side * 0.41)
+            Canvas { context, size in
+                var spokes = Path()
+                for index in 0..<6 {
+                    let angle = Double(index) * .pi / 3
+                    let center = size.width / 2
+                    spokes.move(to: .init(x: center + cos(angle) * side * 0.09, y: center + sin(angle) * side * 0.09))
+                    spokes.addLine(to: .init(x: center + cos(angle) * side * 0.17, y: center + sin(angle) * side * 0.17))
+                }
+                context.stroke(spokes, with: .color(tint), style: .init(lineWidth: 0.55, lineCap: .round))
+            }
+        }
+        .frame(width: side, height: side)
+        .animation(updateAnimation, value: remaining)
+    }
+
+    private func quotaBar(_ window: QuotaWindow, height: CGFloat = 4) -> some View {
+        tapeProgress(window.remaining, tint: window.remaining == 0 ? finish.eject :
+                     window.remaining <= 0.25 ? finish.lowTape : finish.tape, height: height)
+    }
+
+    private func tapeProgress(_ remaining: Double, tint: Color, height: CGFloat, ticks: Bool = false) -> some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule().fill(finish.ink.opacity(0.13))
+                Capsule().fill(tint).frame(width: geometry.size.width * remaining)
+                    .animation(updateAnimation, value: remaining)
+                if ticks {
+                    ForEach([0.25, 0.5, 0.75], id: \.self) { value in
+                        Rectangle().fill(finish.ink.opacity(value == 0.5 ? 0.36 : 0.22))
+                            .frame(width: 0.55, height: height).offset(x: geometry.size.width * value)
+                    }
+                }
+            }
         }
         .frame(height: height)
         .accessibilityHidden(true)
@@ -858,9 +1073,10 @@ private extension Color {
 
 @MainActor
 private func configuration(for card: Card) -> some WidgetConfiguration {
-    StaticConfiguration(kind: "codeburn." + card.rawValue, provider: SnapshotProvider()) { entry in
+    AppIntentConfiguration(kind: "codeburn." + card.rawValue, intent: VinylSettings.self, provider: SnapshotProvider()) { entry in
         WidgetCard(card: card, entry: entry)
     }
+    .contentMarginsDisabled()
     .configurationDisplayName(card.title)
     .description(card.description)
     .supportedFamilies(card == .quota ? [.systemSmall, .systemMedium, .systemLarge] : [.systemSmall, .systemMedium])

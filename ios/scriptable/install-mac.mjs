@@ -16,7 +16,6 @@ const label = 'local.codeburn.iphone-quota'
 const agents = join(homedir(), 'Library', 'LaunchAgents')
 const plist = join(agents, `${label}.plist`)
 const domain = `gui/${process.getuid()}`
-const artifact = join(state, 'CodeBurn 套餐额度.js')
 
 await mkdir(state, { recursive: true, mode: 0o700 })
 try {
@@ -36,8 +35,13 @@ const settings = {
 const template = await readFile(join(dir, 'quota-widget.js'), 'utf8')
 const marker = 'const settings = null // Replaced when exporting the configured script.'
 if (!template.includes(marker)) throw new Error('Missing Scriptable settings marker')
-const script = template.replace(marker, () => `const settings = ${JSON.stringify(settings)}`)
-await writeFile(artifact, script, { mode: 0o600 })
+const scriptFiles = []
+for (const [card, title] of [['quota', '套餐额度'], ['today', '今日用量'], ['trend', '7 天趋势']]) {
+  const file = join(state, `CodeBurn ${title}.js`)
+  const script = template.replace(marker, () => `const settings = ${JSON.stringify({ ...settings, card })}`)
+  await writeFile(file, script, { mode: 0o600 })
+  scriptFiles.push(file)
+}
 
 const strings = [process.env.CODEBURN_WIDGET_NODE || process.execPath, join(dir, 'quota-bridge.mjs'), keyFile]
 const xmlString = value => '<string>' + value.replaceAll('&', '&amp;')
@@ -64,4 +68,4 @@ if (spawnSync('/bin/launchctl', ['print', `${domain}/${label}`]).status === 0) {
   launchctl(['bootout', `${domain}/${label}`])
 }
 launchctl(['bootstrap', domain, plist])
-console.log(artifact)
+console.log(scriptFiles.join('\n'))

@@ -21,10 +21,22 @@ test('private endpoint projects only quota fields and fails closed without a usa
     assert.equal((await fetch(url, { method: 'POST', headers })).status, 405)
     assert.equal((await fetch(url + '?all=true', { headers })).status, 404)
     assert.equal((await fetch(url, { headers })).status, 503)
+    const usageUrl = new URL('/codeburn-usage', url)
+    const artUrl = new URL('/codeburn-vinyl/light-18.png', url)
+    assert.equal((await fetch(usageUrl)).status, 401)
+    assert.equal((await fetch(artUrl)).status, 401)
+    const art = await fetch(artUrl, { headers })
+    assert.equal(art.status, 200)
+    assert.equal(art.headers.get('content-type'), 'image/png')
+    assert.equal(Buffer.from(await art.arrayBuffer()).subarray(1, 4).toString(), 'PNG')
 
     const updatedAt = '2026-11-20T01:00:00.000Z'
     await writeFile(file, JSON.stringify({
-      version: 1, usage: { sessions: ['example'] },
+      version: 1, usage: {
+        sessions: ['example'], updatedAt, day: '2026-11-20',
+        agents: [{ id: 'codex', tokens: 500, input: 400, cached: 350, extra: 'discard' }],
+        days: [{ day: '2026-11-20', tokens: 500, extra: 'discard' }],
+      },
       quota: { updatedAt, agents: [{
         id: 'codex', stale: true, extra: 'discard',
         windows: [{ label: 'Weekly', percent: 0.56, resetsAt: 'bad date', extra: 'discard' }],
@@ -39,6 +51,17 @@ test('private endpoint projects only quota fields and fails closed without a usa
         { id: 'zcode', stale: false, windows: [] },
         { id: 'antigravity', stale: false, windows: [] },
       ],
+    })
+    const usage = await fetch(usageUrl, { headers })
+    assert.equal(usage.status, 200)
+    assert.deepEqual(await usage.json(), {
+      version: 1, updatedAt, day: '2026-11-20',
+      agents: [
+        { id: 'codex', tokens: 500, input: 400, cached: 350 },
+        { id: 'zcode', tokens: null, input: null, cached: null },
+        { id: 'antigravity', tokens: null, input: null, cached: null },
+      ],
+      days: [{ day: '2026-11-20', tokens: 500 }],
     })
     await chmod(file, 0o644)
     assert.equal((await fetch(url, { headers })).status, 503)
