@@ -38,7 +38,13 @@ npm --prefix app run package:widgets
 
 ## iPhone 小组件
 
-Scriptable 提供「套餐额度」「今日用量」和「7 天趋势」。Mac 上的 CodeBurn 负责同步额度和用量，iPhone 通过同一 Tailscale 私网读取汇总。黑胶外观默认银白，也可在小组件的 Parameter 填入 `dark`、`walnut` 或 `system`。Mac 可在「编辑小组件」中选择同样的外观。
+Scriptable 提供「套餐额度」「今日用量」和「7 天趋势」。Mac 上的 CodeBurn 负责同步额度和用量，iPhone 通过同一 Tailscale 私网读取汇总。黑胶外观默认银白，也可在小组件的 Parameter 填入 `dark`、`walnut` 或 `system`。Mac 的三张卡片共享外观，可用以下命令更改，下一次刷新时应用。
+
+```sh
+node mac/Widgets/set-finish.mjs dark
+```
+
+可用值为 `silver`、`dark`、`walnut`、`system`。
 
 额度的双卷轴随已用和剩余比例调整，耗尽时显示「耗尽」，已到重置时间但还未重新取得数据的窗口显示「待更新」。遇到断线会显示上次缓存及原刷新时间，iOS 决定实际刷新频率。唱盘以 10 亿 Token 为视觉刻度上限，超过刻度仍显示实际 Token 数。唱盘刻度只表示用量，套餐额度由单独的配额快照提供。
 

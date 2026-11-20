@@ -1,4 +1,3 @@
-import AppIntents
 import AppKit
 import Foundation
 import SwiftUI
@@ -277,13 +276,21 @@ private enum Card: String {
     }
 }
 
-enum VinylFinish: String, AppEnum {
+private enum VinylFinish: String {
     case silver, dark, walnut, system
 
-    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Finish"
-    static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
-        .silver: "银白", .dark: "深夜", .walnut: "胡桃木", .system: "跟随系统",
-    ]
+    static func load() -> Self {
+        guard let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return .silver
+        }
+        let file = directory.appending(path: "CodeBurn Widgets/vinyl-finish")
+        guard let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 16,
+              let value = try? String(contentsOf: file, encoding: .utf8),
+              let finish = Self(rawValue: value.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return .silver
+        }
+        return finish
+    }
 
     var assets: String {
         switch self {
@@ -340,29 +347,23 @@ enum VinylFinish: String, AppEnum {
     }
 }
 
-struct VinylSettings: WidgetConfigurationIntent {
-    static var title: LocalizedStringResource = "CodeBurn 外观"
-    @Parameter(title: "外观", default: .silver) var finish: VinylFinish
-}
-
 private struct Entry: TimelineEntry {
     let date: Date
     let snapshot: Snapshot?
     var finish: VinylFinish = .silver
 }
 
-private struct SnapshotProvider: AppIntentTimelineProvider {
+private struct SnapshotProvider: TimelineProvider {
     func placeholder(in context: Context) -> Entry {
         let now = Date()
-        return .init(date: now, snapshot: .sample(now: now))
+        return .init(date: now, snapshot: .sample(now: now), finish: .load())
     }
 
-    func snapshot(for configuration: VinylSettings, in context: Context) async -> Entry {
-        let now = Date()
-        return .init(date: now, snapshot: context.isPreview ? .sample(now: now) : .load(), finish: configuration.finish)
+    func getSnapshot(in context: Context, completion: @escaping (Entry) -> Void) {
+        completion(context.isPreview ? placeholder(in: context) : .init(date: Date(), snapshot: .load(), finish: .load()))
     }
 
-    func timeline(for configuration: VinylSettings, in context: Context) async -> Timeline<Entry> {
+    func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> Void) {
         let now = Date()
         let snapshot = Snapshot.load()
         let windows = snapshot?.quota?.agents.flatMap(\.windows) ?? []
@@ -371,7 +372,7 @@ private struct SnapshotProvider: AppIntentTimelineProvider {
         let midnight = civilCalendar.nextDate(after: now, matching: .init(hour: 0, minute: 0), matchingPolicy: .nextTime)
         let reset = windows.compactMap { parseDate($0.resetsAt) }.filter { $0 > now }.min()
         let next = min(now.addingTimeInterval(interval), midnight ?? .distantFuture, reset ?? .distantFuture)
-        return Timeline(entries: [.init(date: now, snapshot: snapshot, finish: configuration.finish)], policy: .after(next))
+        completion(Timeline(entries: [.init(date: now, snapshot: snapshot, finish: .load())], policy: .after(next)))
     }
 }
 
@@ -1073,7 +1074,7 @@ private extension Color {
 
 @MainActor
 private func configuration(for card: Card) -> some WidgetConfiguration {
-    AppIntentConfiguration(kind: "codeburn." + card.rawValue, intent: VinylSettings.self, provider: SnapshotProvider()) { entry in
+    StaticConfiguration(kind: "codeburn." + card.rawValue, provider: SnapshotProvider()) { entry in
         WidgetCard(card: card, entry: entry)
     }
     .contentMarginsDisabled()
