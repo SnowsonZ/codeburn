@@ -483,7 +483,7 @@ function todayPanel(widget, usage, family, width) {
   for (const agent of ranked) {
     const row = horizontal(widget)
     const ticker = slot(row, small ? Math.max(52, width * 0.47) : 138, 13)
-    icon(ticker, agent.id, 9, 'terminal', new Color(agentColors[agentIds.indexOf(agent.id)]))
+    icon(ticker, agent.id, 9, 'terminal')
     ticker.addSpacer()
     text(ticker, tokenText(agent.tokens), Font.semiboldMonospacedSystemFont(8.7))
     row.addSpacer()

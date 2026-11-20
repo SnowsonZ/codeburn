@@ -555,7 +555,7 @@ private struct WidgetCard: View {
                     ForEach(usage.rankedAgents, id: \.id) { row in
                         HStack(spacing: 4) {
                             quotaLogo("provider-" + row.id.rawValue, fallback: "terminal", size: 10)
-                                .foregroundStyle(row.id.color)
+                                .foregroundStyle(finish.ink)
                             if !wide { Spacer(minLength: 2) }
                             Text(compact(row.tokens)).minimumScaleFactor(0.72)
                             if wide, let rate = row.cacheRate {
