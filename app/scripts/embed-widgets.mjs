@@ -25,7 +25,7 @@ function plist(file, key) {
 try {
   const marketingVersion = plist(hostInfo, 'CFBundleShortVersionString')
   // WidgetKit uses the native build number to invalidate cached widget views.
-  const buildVersion = '6'
+  const buildVersion = '7'
   run('xcodebuild', [
     '-project', path.join(sources, name + '.xcodeproj'), '-scheme', name,
     '-configuration', 'Release', '-destination', 'generic/platform=macOS',

@@ -288,10 +288,11 @@ private struct SnapshotProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> Void) {
         let now = Date()
         let snapshot = Snapshot.load()
-        let interval: TimeInterval = snapshot == nil ? 5 * 60 : 15 * 60
+        let windows = snapshot?.quota?.agents.flatMap(\.windows) ?? []
+        let waitingForQuota = windows.contains { !$0.isActive(at: now) }
+        let interval: TimeInterval = snapshot == nil || waitingForQuota ? 5 * 60 : 15 * 60
         let midnight = civilCalendar.nextDate(after: now, matching: .init(hour: 0, minute: 0), matchingPolicy: .nextTime)
-        let reset = snapshot?.quota?.agents.flatMap(\.windows)
-            .compactMap { parseDate($0.resetsAt) }.filter { $0 > now }.min()
+        let reset = windows.compactMap { parseDate($0.resetsAt) }.filter { $0 > now }.min()
         let next = min(now.addingTimeInterval(interval), midnight ?? .distantFuture, reset ?? .distantFuture)
         completion(Timeline(entries: [.init(date: now, snapshot: snapshot)], policy: .after(next)))
     }
@@ -474,9 +475,10 @@ private struct WidgetCard: View {
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(quota.agents, id: \.id) { row in
-                    let windows = activeWindows(row)
-                    let window = row.id == .antigravity ? windows.min { $0.remaining < $1.remaining } : windows.first
-                    if let window {
+                    let windows = row.windows.filter { $0.isActive(at: entry.date) }
+                    let preferred = row.id == .antigravity ? windows.min { $0.remaining < $1.remaining } : windows.first
+                    if let window = preferred ?? row.windows.first {
+                        let active = window.isActive(at: entry.date)
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 4) {
                                 harnessIcon(row.id)
@@ -493,10 +495,14 @@ private struct WidgetCard: View {
                                 } else {
                                     Text(window.name).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
                                 }
-                                remainingValue(window)
+                                if active {
+                                    remainingValue(window)
+                                } else {
+                                    pendingQuotaValue(window.name)
+                                }
                             }
                             .font(.system(size: 11.5, weight: .medium))
-                            quotaBar(window)
+                            if active { quotaBar(window) }
                         }
                         .accessibilityElement(children: .combine)
                     }
@@ -505,14 +511,10 @@ private struct WidgetCard: View {
         }
     }
 
-    private func activeWindows(_ agent: QuotaAgent) -> [QuotaWindow] {
-        agent.windows.filter { $0.isActive(at: entry.date) }
-    }
-
     private func quotaTable(_ quota: QuotaSnapshot) -> some View {
         let accounts = quota.agents.filter { $0.id != .antigravity }
         let antigravity = quota.agents.first { $0.id == .antigravity }
-        let models = modelQuotaRows(antigravity.map(activeWindows) ?? [])
+        let models = modelQuotaRows(antigravity?.windows ?? [])
         let limit = large ? 8 : 3
         return Grid(alignment: .leading, horizontalSpacing: large ? 14 : 8, verticalSpacing: large ? 10 : 2) {
             GridRow {
@@ -556,7 +558,7 @@ private struct WidgetCard: View {
 
     @ViewBuilder
     private func accountQuotaRows(_ account: QuotaAgent) -> some View {
-        let windows = activeWindows(account)
+        let windows = account.windows
         let fiveHours = windows.first { $0.accountPeriod == .fiveHours }
         let weekly = windows.first { $0.accountPeriod == .weekly }
         if fiveHours != nil || weekly != nil {
@@ -654,9 +656,17 @@ private struct WidgetCard: View {
             .accessibilityLabel(copy("剩余", "Remaining") + " " + rate)
     }
 
+    private func pendingQuotaValue(_ label: String) -> some View {
+        Text(copy("待更新", "Pending"))
+            .font(.system(size: large ? 12 : 10, weight: .medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .accessibilityLabel(label + " " + copy("已到重置时间，等待额度更新", "reset reached; waiting for updated quota"))
+    }
+
     @ViewBuilder
     private func quotaCell(_ window: QuotaWindow?, period: QuotaPeriod? = nil) -> some View {
-        if let window {
+        if let window, window.isActive(at: entry.date) {
             HStack(spacing: 5) {
                 quotaBar(window, height: large ? 6 : 4)
                 remainingValue(window).frame(width: large ? 39 : 29, alignment: .trailing)
@@ -665,6 +675,10 @@ private struct WidgetCard: View {
             .frame(height: quotaRowHeight)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel((period?.title ?? window.name) + " " + copy("剩余", "Remaining") + " " + percent(window.remaining))
+        } else if let window {
+            pendingQuotaValue(period?.title ?? window.name)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .frame(height: quotaRowHeight)
         } else {
             Color.clear.frame(height: quotaRowHeight)
                 .gridCellUnsizedAxes(.horizontal)
