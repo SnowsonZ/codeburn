@@ -668,8 +668,8 @@ private struct WidgetCard: View {
             }
             GeometryReader { geometry in
                 let gap: CGFloat = wide ? 7 : 3.5
-                let deck: CGFloat = 14
-                let axisWidth = geometry.size.width * (wide ? 0.78 : 0.76)
+                let deck: CGFloat = 10.5
+                let axisWidth = geometry.size.width * (wide ? 0.88 : 0.86)
                 let columns = max(1, usage.days.count)
                 let column = max(0, (axisWidth - CGFloat(columns - 1) * gap) / CGFloat(columns))
                 let coverHeight = max(0, geometry.size.height - deck - 2)
@@ -685,7 +685,7 @@ private struct WidgetCard: View {
                     HStack(spacing: gap) {
                         ForEach(usage.days) { row in
                             Text(parseDay(row.day)?.formatted(.dateTime.weekday(.narrow)) ?? "—")
-                                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 7.75, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(row.day == usage.day ? finish.orange : finish.ink)
                                 .lineLimit(1).minimumScaleFactor(0.8)
                                 .frame(width: column)

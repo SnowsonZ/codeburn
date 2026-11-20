@@ -537,9 +537,8 @@ function todayPanel(widget, usage, family, width) {
   }
 }
 
-function sleeveImage(usage, width, height) {
+function sleeveImage(usage, width, height, axisHeight) {
   const canvas = new DrawContext()
-  const axisHeight = 12
   canvas.size = new Size(width, height + axisHeight)
   canvas.opaque = false
   canvas.respectScreenScale = true
@@ -593,8 +592,8 @@ function sleeveImage(usage, width, height) {
     const weekday = days[new Date(row.day + 'T12:00:00').getDay()] ?? '—'
     canvas.setTextAlignedCenter()
     canvas.setTextColor(today ? palette.accent : palette.primary)
-    canvas.setFont(Font.semiboldSystemFont(8))
-    canvas.drawTextInRect(weekday, new Rect(x, height + 0.5, column, axisHeight - 0.5))
+    canvas.setFont(Font.semiboldSystemFont(7.2))
+    canvas.drawTextInRect(weekday, new Rect(x, height + 0.25, column, axisHeight - 0.25))
     canvas.setTextAlignedLeft()
   }
   return canvas.getImage()
@@ -605,12 +604,13 @@ function trendPanel(widget, usage, family, width, widgetHeight) {
   tokenAmount(widget, sum(usage.days.map(day => day.tokens)), small ? 22 : 29, 9, true)
   widget.addSpacer()
   const totalHeight = small ? 27 : 35
-  const height = Math.max(28, Math.min(60, widgetHeight - 2 * inset - 18 - 4 - totalHeight - 12 - 13 - 6))
-  const chartWidth = Math.floor(width * (small ? 0.76 : 0.78))
-  const line = slot(widget, width, height + 12)
+  const axisHeight = 9.5
+  const height = Math.max(28, Math.min(62, widgetHeight - 2 * inset - 18 - 4 - totalHeight - axisHeight - 13 - 6))
+  const chartWidth = Math.floor(width * (small ? 0.86 : 0.88))
+  const line = slot(widget, width, height + axisHeight)
   line.addSpacer(Math.floor((width - chartWidth) / 2))
-  const display = line.addImage(sleeveImage(usage, chartWidth, height))
-  display.imageSize = new Size(chartWidth, height + 12)
+  const display = line.addImage(sleeveImage(usage, chartWidth, height, axisHeight))
+  display.imageSize = new Size(chartWidth, height + axisHeight)
 }
 
 function vinylWidget(card, data, status, now, family, art) {
