@@ -24,7 +24,7 @@ type WidgetUsage = {
 }
 type WidgetQuota = {
   updatedAt: string
-  agents: Array<{ id: Agent; windows: QuotaWindow[] }>
+  agents: Array<{ id: Agent; windows: QuotaWindow[]; stale?: true }>
 }
 type WidgetSnapshot = { version: 1; usage: WidgetUsage | null; quota: WidgetQuota | null }
 
@@ -83,20 +83,30 @@ export function makeWidgetUsage(reports: readonly unknown[], now: Date): WidgetU
   }
 }
 
-export function makeWidgetQuota(rows: readonly QuotaProvider[], now: Date): WidgetQuota {
+export function makeWidgetQuota(rows: readonly QuotaProvider[], now: Date, previous?: WidgetQuota | null): WidgetQuota {
   return {
     updatedAt: now.toISOString(),
     agents: WIDGET_AGENTS.map(id => {
-      const row = rows.find(entry => entry.provider === id && entry.connection === 'connected')
-      const windows = row ? [row.primary, ...row.details].filter((window): window is QuotaWindow => Boolean(window)) : []
-      const unique = new Map(windows.map(window => [window.label, window]))
-      return {
-        id,
-        windows: [...unique.values()].filter(window => Number.isFinite(window.percent) && window.percent >= 0 && window.percent <= 1)
-          // Model groups use the full bucket label to pair their time windows.
-          .slice(0, id === 'antigravity' ? 24 : 2)
-          .map(window => ({ label: window.label.slice(0, 120), percent: window.percent, resetsAt: window.resetsAt })),
-      }
+      const row = rows.find(entry => entry.provider === id)
+      const retrying = row?.connection === 'transientFailure' || row?.connection === 'stale'
+      const reported = row && (row.connection === 'connected' || retrying)
+        ? [row.primary, ...row.details].filter((window): window is QuotaWindow => Boolean(window))
+        : []
+      const last = Array.isArray(previous?.agents) ? previous.agents.find(agent => agent?.id === id)?.windows : undefined
+      // After an app restart, the provider service may have no retained copy.
+      // Reuse the widget's last snapshot only for a temporary failure.
+      const source = retrying && reported.length === 0 && Array.isArray(last) ? last : reported
+      const valid = source.filter(window => window && typeof window.label === 'string'
+        && Number.isFinite(window.percent) && window.percent >= 0 && window.percent <= 1)
+      const unique = new Map(valid.map(window => [window.label, window]))
+      const windows = [...unique.values()]
+        .slice(0, id === 'antigravity' ? 24 : 2)
+        .map(window => ({
+          label: window.label.slice(0, 120),
+          percent: window.percent,
+          resetsAt: typeof window.resetsAt === 'string' ? window.resetsAt : null,
+        }))
+      return retrying && windows.length > 0 ? { id, windows, stale: true } : { id, windows }
     }),
   }
 }
@@ -132,7 +142,7 @@ export function startWidgetSnapshots(home: string, readUsage: typeof spawnCli, r
       }).catch(() => null)
       const usage = dayKey(before) === dayKey(now) && usageResult.status === 'fulfilled'
         ? makeWidgetUsage(usageResult.value, now) : null
-      const quota = quotaResult.status === 'fulfilled' ? makeWidgetQuota(quotaResult.value, now) : null
+      const quota = quotaResult.status === 'fulfilled' ? makeWidgetQuota(quotaResult.value, now, old?.quota) : null
       await atomicWriteSecureFile(file, JSON.stringify({
         version: 1, usage: usage ?? old?.usage ?? null, quota: quota ?? old?.quota ?? null,
       } satisfies WidgetSnapshot))

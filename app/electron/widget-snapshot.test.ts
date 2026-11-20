@@ -63,6 +63,25 @@ describe('desktop widget quota snapshot', () => {
     expect(makeWidgetQuota([row], now).agents.find(agent => agent.id === 'antigravity')?.windows).toEqual(windows)
   })
 
+  it('keeps the last known Codex quota across temporary failures and clears it on disconnect', () => {
+    const weekly = { label: 'Weekly', percent: 0.55, resetsAt: '2026-11-22T00:00:00Z' }
+    const codex: QuotaProvider = {
+      provider: 'codex', connection: 'connected', primary: weekly, details: [weekly],
+      planLabel: 'Pro', footerLines: [],
+    }
+    const live = makeWidgetQuota([codex], now)
+    const empty = { ...codex, primary: null, details: [] }
+    const retrying = { ...empty, connection: 'transientFailure' } as const
+    const first = makeWidgetQuota([retrying], new Date(now.getTime() + 60_000), live)
+    const second = makeWidgetQuota([retrying], new Date(now.getTime() + 120_000), first)
+    expect(first.agents[0]).toEqual({ id: 'codex', windows: [weekly], stale: true })
+    expect(second.agents[0]).toEqual(first.agents[0])
+    expect(makeWidgetQuota([{ ...empty, connection: 'disconnected' }], now, second).agents[0])
+      .toEqual({ id: 'codex', windows: [] })
+    expect(makeWidgetQuota([codex], now, second).agents[0])
+      .toEqual({ id: 'codex', windows: [weekly] })
+  })
+
   it('includes published windows only for the three agents and retains reset time', () => {
     const weekly = { label: 'Weekly', percent: 0.45, resetsAt: '2026-11-22T00:00:00Z' }
     const session = { label: '5-hour', percent: 0.76, resetsAt: null }
@@ -75,7 +94,7 @@ describe('desktop widget quota snapshot', () => {
     expect(snapshot.agents.map(row => row.id)).toEqual(WIDGET_AGENTS)
     expect(snapshot.agents[1]).toEqual({ id: 'zcode', windows: [weekly, session] })
     expect(snapshot.agents[0]?.windows).toEqual([])
-    expect(snapshot.agents[2]?.windows).toEqual([])
+    expect(snapshot.agents[2]).toEqual({ id: 'antigravity', windows: [session], stale: true })
   })
 })
 

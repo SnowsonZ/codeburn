@@ -119,6 +119,7 @@ private struct QuotaWindow: Decodable {
 private struct QuotaAgent: Decodable {
     let id: Agent
     let windows: [QuotaWindow]
+    var stale: Bool? = nil
 }
 
 private struct ModelQuotaRow: Identifiable {
@@ -481,7 +482,7 @@ private struct WidgetCard: View {
                         let active = window.isActive(at: entry.date)
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 4) {
-                                harnessIcon(row.id)
+                                quotaSourceIcon(row)
                                 if row.id == .antigravity {
                                     Rectangle().fill(Color.secondary.opacity(0.26)).frame(width: 1, height: 10)
                                         .accessibilityHidden(true)
@@ -505,6 +506,12 @@ private struct WidgetCard: View {
                             if active { quotaBar(window) }
                         }
                         .accessibilityElement(children: .combine)
+                    } else {
+                        HStack {
+                            quotaSourceIcon(row)
+                            Spacer(minLength: 0)
+                            unavailableQuotaValue
+                        }
                     }
                 }
             }
@@ -523,9 +530,11 @@ private struct WidgetCard: View {
                 periodLabel(.weekly).frame(maxWidth: .infinity, alignment: .trailing)
             }
             ForEach(accounts, id: \.id, content: accountQuotaRows)
-            if !models.isEmpty {
+            if let antigravity, models.isEmpty {
+                unavailableQuotaRow(antigravity)
+            } else if let antigravity {
                 GridRow(alignment: .center) {
-                    quotaIconCell(harnessIcon(.antigravity))
+                    quotaIconCell(quotaSourceIcon(antigravity))
                     HStack(spacing: 8) {
                         Rectangle().fill(Color.secondary.opacity(0.25)).frame(height: 1)
                             .accessibilityHidden(true)
@@ -561,16 +570,17 @@ private struct WidgetCard: View {
         let windows = account.windows
         let fiveHours = windows.first { $0.accountPeriod == .fiveHours }
         let weekly = windows.first { $0.accountPeriod == .weekly }
+        if windows.isEmpty { unavailableQuotaRow(account) }
         if fiveHours != nil || weekly != nil {
             GridRow {
-                quotaIconCell(harnessIcon(account.id))
+                quotaIconCell(quotaSourceIcon(account))
                 quotaCell(fiveHours, period: .fiveHours)
                 quotaCell(weekly, period: .weekly)
             }
         }
         ForEach(windows.filter { $0.accountPeriod == nil }, id: \.label) { window in
             GridRow {
-                quotaIconCell(harnessIcon(account.id))
+                quotaIconCell(quotaSourceIcon(account))
                 HStack(spacing: 5) {
                     Text(window.name).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
                     quotaCell(window)
@@ -582,6 +592,38 @@ private struct WidgetCard: View {
 
     private func quotaIconCell<Icon: View>(_ icon: Icon) -> some View {
         icon.frame(width: quotaIdentityWidth, height: quotaRowHeight, alignment: .leading)
+    }
+
+    private var unavailableQuotaValue: some View {
+        Text(copy("额度暂不可用", "Quota unavailable"))
+            .font(.system(size: large ? 12 : 10, weight: .medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+    }
+
+    private func unavailableQuotaRow(_ agent: QuotaAgent) -> some View {
+        GridRow(alignment: .center) {
+            quotaIconCell(quotaSourceIcon(agent))
+            unavailableQuotaValue
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .gridCellColumns(2)
+        }
+    }
+
+    private func quotaSourceIcon(_ agent: QuotaAgent) -> some View {
+        HStack(spacing: 4) {
+            harnessIcon(agent.id)
+            if agent.stale == true {
+                let title = copy("显示上次取得的额度", "Showing last known quota")
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: large ? 10 : 8))
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(title)
+                    .help(title)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private func modelQuotaIconCell(_ group: String) -> some View {
