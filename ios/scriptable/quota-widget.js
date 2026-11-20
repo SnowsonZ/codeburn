@@ -130,7 +130,7 @@ function accountRows(agent) {
   return rows.concat(other.map(window => ({ ...agent, single: window, label: window.label })))
 }
 
-function gravityRows(agent, limit) {
+function gravityRows(agent) {
   if (!agent.windows.length) return [{ ...agent, message: '额度暂不可用' }]
   const groups = new Map()
   const rows = []
@@ -148,7 +148,7 @@ function gravityRows(agent, limit) {
     }
     groups.get(group)[period] = window
   }
-  return [{ ...agent, rule: true, extra: Math.max(0, rows.length - limit) }, ...rows.slice(0, limit)]
+  return [{ ...agent, rule: true }, ...rows]
 }
 
 function bar(parent, width, height, remaining, detailed) {
@@ -244,53 +244,68 @@ function rule(parent, width) {
   slot(parent, width, 1).backgroundColor = palette.rule
 }
 
-function quotaTable(widget, quota, now, width, availableHeight, large) {
+function quotaRows(agents, capacity) {
+  const groups = agents.map(agent => agent.id === 'antigravity' ? gravityRows(agent) : accountRows(agent))
+  let extraRows = Math.max(0, capacity - groups.length)
+  const rows = groups.slice(0, capacity).flatMap(group => {
+    const extras = Math.min(extraRows, group.length - 1)
+    extraRows -= extras
+    return group.slice(0, 1 + extras)
+  })
+  return { rows, hidden: groups.reduce((total, group) => total + group.length, 0) - rows.length }
+}
+
+function quotaTable(widget, quota, now, width, tableBudget, large) {
   const column = Math.floor((width - railWidth - 2 * columnGap) / 2)
   const span = column * 2 + columnGap
-  const byId = new Map(quota.agents.map(agent => [agent.id, agent]))
-  const account = id => byId.get(id) ?? { id, windows: [] }
-  const accounts = [...accountRows(account('codex')), ...accountRows(account('zcode'))]
-  const minRowHeight = large ? 18 : 9
-  const maxModelCount = Math.min(large ? 8 : 3, Math.max(1, Math.floor(availableHeight / minRowHeight) - accounts.length - 1))
-  const rows = [...accounts, ...gravityRows(account('antigravity'), maxModelCount)]
-  const rowHeight = Math.min(large ? 38 : 14, Math.floor(availableHeight / rows.length))
-  const valueSize = rowHeight >= 30 ? 16 : rowHeight >= 20 ? 13 : Math.min(9.75, rowHeight - 2)
+  const headerHeight = large ? 17 : 12
+  const headerGap = large ? 4 : 3
+  const rowBudget = tableBudget - headerHeight - headerGap
+  const minPitch = large ? 16 : 10
+  const { rows, hidden } = quotaRows(quota.agents, Math.floor(rowBudget / minPitch))
+  if (!rows.length) {
+    text(widget, '额度暂不可用', Font.mediumSystemFont(10), palette.secondary)
+    return
+  }
+  const pitch = Math.min(large ? 27 : 16, Math.floor(rowBudget / rows.length))
+  const gap = large ? 3 : pitch >= 13 ? 2 : 1
+  const rowHeight = pitch - gap
+  const valueSize = rowHeight >= 20 ? 13 : Math.min(9.75, rowHeight - 1.5)
 
-  const headers = slot(widget, width, large ? 16 : 12)
-  headers.addSpacer(railWidth + columnGap)
+  // Fit a fixed-height table to the card, without stretchable row gaps.
+  const table = widget.addStack()
+  table.layoutVertically()
+  table.spacing = 0
+  table.size = new Size(width, headerHeight + headerGap + pitch * rows.length - gap)
+  const headers = slot(table, width, headerHeight)
+  const identityHeading = slot(headers, railWidth, headerHeight)
+  if (hidden) text(identityHeading, `另 ${hidden} 条`, Font.mediumSystemFont(large ? 9.5 : 8), palette.secondary)
+  headers.addSpacer(columnGap)
   const periods = ['5 小时', '每周']
   for (const title of periods) {
-    const heading = slot(headers, column, large ? 16 : 12)
+    const heading = slot(headers, column, headerHeight)
     heading.addSpacer()
     text(heading, title, Font.mediumSystemFont(large ? 10.5 : 8.5), palette.secondary)
     if (title === periods[0]) headers.addSpacer(columnGap)
   }
-  widget.addSpacer(2)
-
-  // Keep the row contents bounded; share surplus space between the rows and footer.
+  table.addSpacer(headerGap)
   for (const [index, row] of rows.entries()) {
-    if (large || index > 0) widget.addSpacer()
-    const height = row.rule ? Math.min(26, rowHeight) : rowHeight
-    const line = slot(widget, width, height)
-    identity(line, row, height)
+    if (index > 0) table.addSpacer(gap)
+    const line = slot(table, width, rowHeight)
+    identity(line, row, rowHeight)
     line.addSpacer(columnGap)
     if (row.rule) {
-      const separator = slot(line, span, height)
-      rule(separator, row.extra ? span - 29 : span)
-      if (row.extra) {
-        separator.addSpacer(6)
-        text(separator, `+${row.extra}`, Font.mediumSystemFont(Math.min(10, valueSize)), palette.secondary)
-      }
+      rule(slot(line, span, rowHeight), span)
     } else if (row.message) {
-      const message = slot(line, span, height)
+      const message = slot(line, span, rowHeight)
       message.addSpacer()
       text(message, row.message, Font.mediumSystemFont(valueSize), palette.secondary)
     } else if (row.single) {
-      quotaCell(line, span, height, valueSize, row.single, now, row.label)
+      quotaCell(line, span, rowHeight, valueSize, row.single, now, row.label)
     } else {
-      quotaCell(line, column, height, valueSize, row.short, now)
+      quotaCell(line, column, rowHeight, valueSize, row.short, now)
       line.addSpacer(columnGap)
-      quotaCell(line, column, height, valueSize, row.week, now)
+      quotaCell(line, column, rowHeight, valueSize, row.week, now)
     }
   }
 }
@@ -644,9 +659,8 @@ function vinylWidget(card, data, status, now, family, art) {
     smallQuota(widget, data, now, contentWidth)
   } else {
     const large = family === 'large'
-    const reserve = large ? 10 : height < 150 ? 7 : 11
-    const rowBudget = height - 2 * inset - 18 - 4 - (large ? 18 : 14) - 13 - reserve
-    quotaTable(widget, data, now, contentWidth, rowBudget, large)
+    const tableBudget = height - (2 * inset + 18 + 4 + 13 + 8)
+    quotaTable(widget, data, now, contentWidth, tableBudget, large)
   }
 
   widget.addSpacer()
