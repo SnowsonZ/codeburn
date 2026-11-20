@@ -268,9 +268,9 @@ function quotaTable(widget, quota, now, width, availableHeight, large) {
   }
   widget.addSpacer(2)
 
-  // Medium widgets get fixed-height rows so their header and footer have room.
-  for (const row of rows) {
-    if (large) widget.addSpacer()
+  // Keep the row contents bounded; share surplus space between the rows and footer.
+  for (const [index, row] of rows.entries()) {
+    if (large || index > 0) widget.addSpacer()
     const height = row.rule ? Math.min(26, rowHeight) : rowHeight
     const line = slot(widget, width, height)
     identity(line, row, height)
@@ -374,13 +374,18 @@ function tokenAmount(parent, count, numberSize, unitSize, withLabel = false) {
   const line = horizontal(parent)
   line.bottomAlignContent()
   text(line, value, Font.boldSystemFont(numberSize))
-  if (unit) {
+
+  // Scriptable aligns the text frames, so compensate for their different descents.
+  const baselineInset = Math.round((numberSize - unitSize) * 0.20)
+  if (unit || withLabel) {
     line.addSpacer(2)
-    text(line, unit, Font.semiboldSystemFont(unitSize), palette.secondary)
-  }
-  if (withLabel) {
-    line.addSpacer(4)
-    text(line, 'Token', Font.mediumSystemFont(unitSize), palette.secondary)
+    const suffix = horizontal(line)
+    suffix.setPadding(0, 0, baselineInset, 0)
+    if (unit) text(suffix, unit, Font.semiboldSystemFont(unitSize), palette.secondary)
+    if (withLabel) {
+      if (unit) suffix.addSpacer(4)
+      text(suffix, 'Token', Font.mediumSystemFont(unitSize), palette.secondary)
+    }
   }
 }
 
@@ -566,8 +571,10 @@ function sleeveImage(usage, width, height) {
       canvas.setFillColor(new Color('#f8cc6a'))
       canvas.fillRect(new Rect(x, Math.max(0, y - 8), column, 6))
       canvas.setTextColor(new Color('#251911'))
-      canvas.setFont(Font.semiboldMonospacedSystemFont(4.8))
-      canvas.drawText('PEAK', new Point(x + 1, Math.max(0, y - 8)))
+      canvas.setFont(Font.semiboldMonospacedSystemFont(Math.min(4.8, column / 2.8)))
+      canvas.setTextAlignedCenter()
+      canvas.drawTextInRect('PEAK', new Rect(x, Math.max(0, y - 8), column, 6))
+      canvas.setTextAlignedLeft()
     }
     const weekday = days[new Date(row.day + 'T12:00:00').getDay()] ?? '—'
     canvas.setTextAlignedCenter()
@@ -585,7 +592,7 @@ function trendPanel(widget, usage, family, width, widgetHeight) {
   widget.addSpacer()
   const totalHeight = small ? 27 : 35
   const height = Math.max(28, Math.min(60, widgetHeight - 2 * inset - 18 - 4 - totalHeight - 12 - 13 - 6))
-  const chartWidth = Math.floor(width * (small ? 0.89 : 0.9))
+  const chartWidth = Math.floor(width * (small ? 0.76 : 0.78))
   const line = slot(widget, width, height + 12)
   line.addSpacer(Math.floor((width - chartWidth) / 2))
   const display = line.addImage(sleeveImage(usage, chartWidth, height))

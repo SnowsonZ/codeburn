@@ -240,8 +240,29 @@ private func sum(_ values: [Int?]) -> Int? {
     return known.count == values.count ? known.reduce(0, +) : nil
 }
 
+private func tokenParts(_ value: Int?) -> (number: String, unit: String) {
+    guard let value, value >= 0 else { return ("—", "") }
+    let units = ["", "K", "M", "B"]
+    var index = 0
+    var amount = Double(value)
+    while amount >= 1_000 && index < units.count - 1 {
+        amount /= 1_000
+        index += 1
+    }
+    let decimals = index == 0 ? 0 : amount < 10 ? 2 : amount < 100 ? 1 : 0
+    let scale = pow(10.0, Double(decimals))
+    var rounded = (amount * scale).rounded() / scale
+    if rounded >= 1_000 && index < units.count - 1 {
+        rounded /= 1_000
+        index += 1
+    }
+    let number = rounded.formatted(.number.precision(.fractionLength(0...decimals)).grouping(.never))
+    return (number, units[index])
+}
+
 private func compact(_ value: Int?) -> String {
-    value?.formatted(.number.notation(.compactName)) ?? "—"
+    let parts = tokenParts(value)
+    return parts.unit.isEmpty ? parts.number : parts.number + " " + parts.unit
 }
 
 private func percent(_ value: Double) -> String {
@@ -557,7 +578,7 @@ private struct WidgetCard: View {
                             quotaLogo("provider-" + row.id.rawValue, fallback: "terminal", size: 10)
                                 .foregroundStyle(finish.ink)
                             if !wide { Spacer(minLength: 2) }
-                            Text(compact(row.tokens)).minimumScaleFactor(0.72)
+                            tokenValue(row.tokens, numberSize: wide ? 10 : 9, unitSize: 7, detail: true)
                             if wide, let rate = row.cacheRate {
                                 Text(percent(rate)).foregroundStyle(secondaryColor)
                             }
@@ -612,44 +633,69 @@ private struct WidgetCard: View {
         .accessibilityHidden(true)
     }
 
+    private func tokenValue(_ total: Int?, numberSize: CGFloat, unitSize: CGFloat, detail: Bool = false) -> some View {
+        let parts = tokenParts(total)
+        return HStack(alignment: .lastTextBaseline, spacing: detail ? 2 : 3) {
+            Text(parts.number)
+                .font(.system(size: numberSize, weight: detail ? .semibold : .black,
+                              design: detail ? .monospaced : .default))
+                .tracking(detail ? 0 : -0.75)
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(detail ? 0.72 : 0.62)
+                .contentTransition(reduceMotion ? .identity : .numericText())
+                .animation(updateAnimation, value: total)
+            if !parts.unit.isEmpty {
+                Text(parts.unit)
+                    .font(.system(size: unitSize, weight: .semibold))
+                    .foregroundStyle(secondaryColor)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
     private func usageTotal(_ total: Int?) -> some View {
-        Text(compact(total))
-            .font(.system(size: wide ? 30 : 26, weight: .black))
-            .tracking(-0.75).monospacedDigit().lineLimit(1).minimumScaleFactor(0.62)
-            .contentTransition(reduceMotion ? .identity : .numericText())
-            .animation(updateAnimation, value: total)
+        tokenValue(total, numberSize: wide ? 30 : 26, unitSize: 9)
     }
 
     private func trend(_ usage: UsageSnapshot) -> some View {
         let maximum = max(1, usage.days.compactMap(\.tokens).max() ?? 0)
         let peakId = usage.days.first { ($0.tokens ?? 0) == maximum }?.id
         return VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
                 usageTotal(sum(usage.days.map(\.tokens)))
                 Text("Token").font(.system(size: 9, weight: .medium)).foregroundStyle(secondaryColor)
             }
             GeometryReader { geometry in
-                HStack(alignment: .bottom, spacing: wide ? 7 : 3.5) {
-                    ForEach(Array(usage.days.enumerated()), id: \.element.id) { index, row in
-                        sleeve(row, index: index, maximum: maximum, height: geometry.size.height,
-                               today: row.day == usage.day, peak: peakId == row.id)
+                let gap: CGFloat = wide ? 7 : 3.5
+                let deck: CGFloat = 14
+                let axisWidth = geometry.size.width * (wide ? 0.78 : 0.76)
+                let columns = max(1, usage.days.count)
+                let column = max(0, (axisWidth - CGFloat(columns - 1) * gap) / CGFloat(columns))
+                let coverHeight = max(0, geometry.size.height - deck - 2)
+                VStack(spacing: 2) {
+                    HStack(alignment: .bottom, spacing: gap) {
+                        ForEach(Array(usage.days.enumerated()), id: \.element.id) { index, row in
+                            sleeve(row, index: index, maximum: maximum, height: coverHeight,
+                                   today: row.day == usage.day, peak: peakId == row.id)
+                                .frame(width: column)
+                        }
                     }
+                    .frame(width: axisWidth, height: coverHeight, alignment: .bottom)
+                    HStack(spacing: gap) {
+                        ForEach(usage.days) { row in
+                            Text(parseDay(row.day)?.formatted(.dateTime.weekday(.narrow)) ?? "—")
+                                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(row.day == usage.day ? finish.orange : finish.ink)
+                                .lineLimit(1).minimumScaleFactor(0.8)
+                                .frame(width: column)
+                        }
+                    }
+                    .frame(width: axisWidth, height: deck)
+                    .background(LinearGradient(colors: finish.crate, startPoint: .top, endPoint: .bottom),
+                                in: RoundedRectangle(cornerRadius: 3))
+                    .accessibilityHidden(true)
                 }
-                .padding(.horizontal, 2)
-                .frame(maxHeight: .infinity, alignment: .bottom)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
-            HStack(spacing: 0) {
-                ForEach(usage.days) { row in
-                    Text(parseDay(row.day)?.formatted(.dateTime.weekday(.narrow)) ?? "—")
-                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(row.day == usage.day ? finish.orange : finish.ink)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .padding(.vertical, 2)
-            .background(LinearGradient(colors: finish.crate, startPoint: .top, endPoint: .bottom),
-                        in: RoundedRectangle(cornerRadius: 3))
-            .accessibilityHidden(true)
         }
     }
 
@@ -661,6 +707,7 @@ private struct WidgetCard: View {
         return VStack(spacing: 0) {
             if peak && !today {
                 Text(copy("峰值", "PEAK")).font(.system(size: 5.5, weight: .black, design: .monospaced))
+                    .lineLimit(1).minimumScaleFactor(0.65)
                     .foregroundStyle(Color(rgb: 0x251911))
                     .padding(.horizontal, 2).padding(.vertical, 0.65)
                     .background(Color(rgb: 0xf8cc6a), in: RoundedRectangle(cornerRadius: 2))
