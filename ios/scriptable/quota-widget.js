@@ -91,33 +91,32 @@ function icon(stack, name, size, fallback, color = palette.primary) {
 function identity(stack, row, height) {
   const rail = slot(stack, railWidth, height)
   if (row.id) {
-    const size = Math.min(height, row.id === 'zcode' ? 22 : 18)
-    const markWidth = 22
-    const offset = (markWidth - size) / 2
-    if (offset > 0) rail.addSpacer(offset)
+    const size = Math.min(height - 2, row.id === 'zcode' ? 22 : 18)
+    rail.addSpacer(Math.max(1, (22 - size) / 2))
     icon(rail, row.id, size, 'terminal')
     if (row.stale) {
-      rail.addSpacer(markWidth - size - offset + 4)
-      icon(rail, null, 10, 'clock.arrow.circlepath', palette.secondary)
+      rail.addSpacer(4)
+      icon(rail, null, Math.min(9, height - 2), 'clock.arrow.circlepath', palette.secondary)
     }
   } else {
-    rail.addSpacer(9)
+    rail.addSpacer(7)
     const name = row.group.toLowerCase()
     const claude = name.includes('claude')
     const gpt = name.includes('gpt')
     const gemini = name.includes('gemini')
     const model = claude ? 'claude' : gpt ? 'codex' : gemini ? 'gemini' : null
-    icon(rail, model, 14, 'cpu')
+    const size = Math.min(height - 2, 14)
+    icon(rail, model, size, 'cpu')
     if (claude && gpt) {
-      rail.addSpacer(4)
-      icon(rail, 'codex', 14, 'circle.hexagongrid')
+      rail.addSpacer(3)
+      icon(rail, 'codex', size, 'circle.hexagongrid')
     } else if (gemini && name.includes('argon')) {
-      rail.addSpacer(4)
-      const badge = slot(rail, 22, 15)
-      badge.cornerRadius = 4
+      rail.addSpacer(3)
+      const badge = slot(rail, 16, Math.min(height - 2, 13))
+      badge.cornerRadius = 3
       badge.backgroundColor = palette.badge
-      badge.addSpacer(5)
-      text(badge, 'Ar', Font.semiboldMonospacedSystemFont(9), palette.secondary)
+      badge.addSpacer(2)
+      text(badge, 'Ar', Font.semiboldMonospacedSystemFont(Math.min(7.5, height - 3)), palette.secondary)
     }
   }
   rail.addSpacer()
@@ -164,7 +163,7 @@ function bar(parent, width, height, remaining, detailed) {
   if (remaining === 0) {
     if (detailed && width >= 28) {
       view.addSpacer()
-      text(view, '耗尽', Font.semiboldSystemFont(7), palette.eject)
+      text(view, '耗尽', Font.semiboldSystemFont(Math.min(7, height - 1.5)), palette.eject)
       view.addSpacer()
     }
     return
@@ -218,25 +217,28 @@ function quotaCell(parent, width, rowHeight, valueSize, window, now, label) {
   if (!window) return
   if (window.resetsAt && Date.parse(window.resetsAt) <= now) {
     view.addSpacer()
-    text(view, '待更新', Font.mediumSystemFont(Math.min(13, valueSize)), palette.secondary)
+    text(view, '待更新', Font.mediumSystemFont(Math.min(12, valueSize)), palette.secondary)
     return
   }
-  const numberWidth = Math.ceil(valueSize * 2.5 + 2)
-  const numberGap = 7
+  const amount = `${Math.round((1 - window.percent) * 100)}%`
+  // Reserve four monospaced characters plus a small inset for 100%.
+  const numberWidth = Math.ceil(valueSize * 3.1 + 3)
+  const numberGap = 5
   let barWidth = width - numberWidth - numberGap
   if (label) {
-    const labelWidth = Math.min(82, Math.floor(width * 0.36))
+    const labelWidth = Math.min(78, Math.floor(width * 0.32))
     const labelSlot = slot(view, labelWidth, rowHeight)
-    text(labelSlot, label === 'Session' ? '会话' : label, Font.mediumSystemFont(11), palette.secondary)
+    text(labelSlot, label === 'Session' ? '会话' : label, Font.mediumSystemFont(Math.min(10, valueSize)), palette.secondary)
     labelSlot.addSpacer()
     barWidth -= labelWidth + numberGap
     view.addSpacer(numberGap)
   }
-  bar(view, barWidth, valueSize >= 15 ? 16 : 12, Math.max(0, 1 - window.percent), true)
+  const barHeight = Math.min(rowHeight - 2, valueSize >= 15 ? 16 : 11)
+  bar(view, barWidth, barHeight, Math.max(0, 1 - window.percent), true)
   view.addSpacer(numberGap)
   const value = slot(view, numberWidth, rowHeight)
-  value.addSpacer()
-  text(value, `${Math.round((1 - window.percent) * 100)}%`, Font.semiboldMonospacedSystemFont(valueSize))
+  value.addSpacer(Math.max(1, Math.floor(numberWidth - amount.length * valueSize * 0.64 - 2)))
+  text(value, amount, Font.semiboldMonospacedSystemFont(valueSize))
 }
 
 function rule(parent, width) {
@@ -249,13 +251,13 @@ function quotaTable(widget, quota, now, width, availableHeight, large) {
   const byId = new Map(quota.agents.map(agent => [agent.id, agent]))
   const account = id => byId.get(id) ?? { id, windows: [] }
   const accounts = [...accountRows(account('codex')), ...accountRows(account('zcode'))]
-  const minRowHeight = large ? 18 : 11
+  const minRowHeight = large ? 18 : 9
   const maxModelCount = Math.min(large ? 8 : 3, Math.max(1, Math.floor(availableHeight / minRowHeight) - accounts.length - 1))
   const rows = [...accounts, ...gravityRows(account('antigravity'), maxModelCount)]
   const rowHeight = Math.min(large ? 38 : 14, Math.floor(availableHeight / rows.length))
-  const valueSize = rowHeight >= 30 ? 16 : rowHeight >= 20 ? 13 : 9.75
+  const valueSize = rowHeight >= 30 ? 16 : rowHeight >= 20 ? 13 : Math.min(9.75, rowHeight - 2)
 
-  const headers = horizontal(widget)
+  const headers = slot(widget, width, large ? 16 : 12)
   headers.addSpacer(railWidth + columnGap)
   const periods = ['5 小时', '每周']
   for (const title of periods) {
@@ -266,12 +268,11 @@ function quotaTable(widget, quota, now, width, availableHeight, large) {
   }
   widget.addSpacer(2)
 
-  // Distribute the space proposed by WidgetKit between rows so the table
-  // expands with the card and the footer stays at the bottom.
+  // Medium widgets get fixed-height rows so their header and footer have room.
   for (const row of rows) {
-    widget.addSpacer()
-    const line = horizontal(widget)
+    if (large) widget.addSpacer()
     const height = row.rule ? Math.min(26, rowHeight) : rowHeight
+    const line = slot(widget, width, height)
     identity(line, row, height)
     line.addSpacer(columnGap)
     if (row.rule) {
@@ -279,12 +280,12 @@ function quotaTable(widget, quota, now, width, availableHeight, large) {
       rule(separator, row.extra ? span - 29 : span)
       if (row.extra) {
         separator.addSpacer(6)
-        text(separator, `+${row.extra}`, Font.mediumSystemFont(10), palette.secondary)
+        text(separator, `+${row.extra}`, Font.mediumSystemFont(Math.min(10, valueSize)), palette.secondary)
       }
     } else if (row.message) {
       const message = slot(line, span, height)
       message.addSpacer()
-      text(message, row.message, Font.mediumSystemFont(11), palette.secondary)
+      text(message, row.message, Font.mediumSystemFont(valueSize), palette.secondary)
     } else if (row.single) {
       quotaCell(line, span, height, valueSize, row.single, now, row.label)
     } else {
@@ -349,11 +350,38 @@ function sum(values) {
     ? null : values.reduce((total, value) => total + value, 0)
 }
 
-function tokenText(number) {
-  if (number === null || !Number.isFinite(number)) return '—'
-  if (number >= 1e8) return `${Number((number / 1e8).toFixed(2))} 亿`
-  if (number >= 1e4) return `${Math.round(number / 1e4)} 万`
-  return String(number)
+function tokenParts(number) {
+  if (number === null || !Number.isFinite(number)) return ['—', '']
+  const units = ['', 'K', 'M', 'B']
+  let index = 0
+  let value = number
+  while (value >= 1000 && index < units.length - 1) {
+    value /= 1000
+    index++
+  }
+  // Use short numbers for the available space and roll over at the next unit.
+  const precision = value < 10 ? 2 : value < 100 ? 1 : 0
+  let rounded = Number(value.toFixed(index === 0 ? 0 : precision))
+  if (rounded >= 1000 && index < units.length - 1) {
+    rounded /= 1000
+    index++
+  }
+  return [String(rounded), units[index]]
+}
+
+function tokenAmount(parent, count, numberSize, unitSize, withLabel = false) {
+  const [value, unit] = tokenParts(count)
+  const line = horizontal(parent)
+  line.bottomAlignContent()
+  text(line, value, Font.boldSystemFont(numberSize))
+  if (unit) {
+    line.addSpacer(2)
+    text(line, unit, Font.semiboldSystemFont(unitSize), palette.secondary)
+  }
+  if (withLabel) {
+    line.addSpacer(4)
+    text(line, 'Token', Font.mediumSystemFont(unitSize), palette.secondary)
+  }
 }
 
 function hitRate(usage) {
@@ -474,7 +502,7 @@ function smallQuota(widget, quota, now, width) {
 
 function todayPanel(widget, usage, family, width) {
   const small = family === 'small'
-  text(widget, tokenText(sum(usage.agents.map(agent => agent.tokens))), Font.boldSystemFont(small ? 25 : 33))
+  tokenAmount(widget, sum(usage.agents.map(agent => agent.tokens)), small ? 25 : 33, 9)
   const rate = hitRate(usage)
   text(widget, rate === null ? 'Token' : `Token · 缓存 ${rate}%`, Font.mediumSystemFont(8), palette.secondary)
   widget.addSpacer()
@@ -485,18 +513,25 @@ function todayPanel(widget, usage, family, width) {
     const ticker = slot(row, small ? Math.max(52, width * 0.47) : 138, 13)
     icon(ticker, agent.id, 9, 'terminal')
     ticker.addSpacer()
-    text(ticker, tokenText(agent.tokens), Font.semiboldMonospacedSystemFont(8.7))
+    tokenAmount(ticker, agent.tokens, 8.7, 7)
     row.addSpacer()
   }
 }
 
 function sleeveImage(usage, width, height) {
   const canvas = new DrawContext()
-  canvas.size = new Size(width, height)
+  const axisHeight = 12
+  canvas.size = new Size(width, height + axisHeight)
   canvas.opaque = false
   canvas.respectScreenScale = true
-  const gap = 4
+  const gap = 3
   const column = (width - 6 * gap) / 7
+  const base = new Path()
+  base.addRoundedRect(new Rect(0, height, width, axisHeight), 2.5, 2.5)
+  canvas.setFillColor(palette.well)
+  canvas.addPath(base)
+  canvas.fillPath()
+  const days = ['日', '一', '二', '三', '四', '五', '六']
   const max = Math.max(1, ...usage.days.map(row => row.tokens ?? 0))
   const peak = usage.days.findIndex(row => row.tokens === max)
   for (const [index, row] of usage.days.entries()) {
@@ -534,29 +569,27 @@ function sleeveImage(usage, width, height) {
       canvas.setFont(Font.semiboldMonospacedSystemFont(4.8))
       canvas.drawText('PEAK', new Point(x + 1, Math.max(0, y - 8)))
     }
+    const weekday = days[new Date(row.day + 'T12:00:00').getDay()] ?? '—'
+    canvas.setTextAlignedCenter()
+    canvas.setTextColor(today ? palette.accent : palette.primary)
+    canvas.setFont(Font.semiboldSystemFont(8))
+    canvas.drawTextInRect(weekday, new Rect(x, height + 0.5, column, axisHeight - 0.5))
+    canvas.setTextAlignedLeft()
   }
   return canvas.getImage()
 }
 
 function trendPanel(widget, usage, family, width, widgetHeight) {
-  text(widget, `${tokenText(sum(usage.days.map(day => day.tokens)))} Token`,
-    Font.boldSystemFont(family === 'small' ? 22 : 29))
+  const small = family === 'small'
+  tokenAmount(widget, sum(usage.days.map(day => day.tokens)), small ? 22 : 29, 9, true)
   widget.addSpacer()
-  const totalHeight = family === 'small' ? 27 : 35
-  const height = Math.max(30, Math.min(62, widgetHeight - 2 * inset - 18 - 4 - totalHeight - 13 - 13 - 4))
-  const display = widget.addImage(sleeveImage(usage, width, height))
-  display.imageSize = new Size(width, height)
-  const base = slot(widget, width, 13)
-  base.backgroundColor = palette.well
-  base.cornerRadius = 3
-  const days = ['日', '一', '二', '三', '四', '五', '六']
-  for (const entry of usage.days) {
-    const day = slot(base, width / 7, 13)
-    day.addSpacer()
-    text(day, days[new Date(entry.day + 'T12:00:00').getDay()] ?? '—',
-      Font.semiboldSystemFont(7.8), entry.day === usage.day ? palette.accent : palette.primary)
-    day.addSpacer()
-  }
+  const totalHeight = small ? 27 : 35
+  const height = Math.max(28, Math.min(60, widgetHeight - 2 * inset - 18 - 4 - totalHeight - 12 - 13 - 6))
+  const chartWidth = Math.floor(width * (small ? 0.89 : 0.9))
+  const line = slot(widget, width, height + 12)
+  line.addSpacer(Math.floor((width - chartWidth) / 2))
+  const display = line.addImage(sleeveImage(usage, chartWidth, height))
+  display.imageSize = new Size(chartWidth, height + 12)
 }
 
 function vinylWidget(card, data, status, now, family, art) {
@@ -611,7 +644,8 @@ function vinylWidget(card, data, status, now, family, art) {
     smallQuota(widget, data, now, contentWidth)
   } else {
     const large = family === 'large'
-    const rowBudget = height - 2 * inset - 18 - 4 - (large ? 18 : 14) - 14 - 8
+    const reserve = large ? 10 : height < 150 ? 7 : 11
+    const rowBudget = height - 2 * inset - 18 - 4 - (large ? 18 : 14) - 13 - reserve
     quotaTable(widget, data, now, contentWidth, rowBudget, large)
   }
 
