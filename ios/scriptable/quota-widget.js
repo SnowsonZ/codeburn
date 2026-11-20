@@ -14,9 +14,8 @@ const palette = {
   primary: new Color(light ? '#181614' : walnut ? '#faf2e6' : '#f6f1ea'),
   secondary: new Color(light ? '#5b554e' : walnut ? '#c9b096' : '#a39a92'),
   accent: new Color(light ? '#d14114' : walnut ? '#f68646' : '#f9671e'),
-  used: new Color(light ? '#b5aaa0' : '#534b45'),
-  remaining: new Color(light ? '#0d9668' : walnut ? '#34d399' : '#10b981'),
-  low: new Color(light ? '#d97706' : walnut ? '#fbbf24' : '#f59e0b'),
+  used: new Color(light ? '#b6a299' : '#634b41'),
+  cassetteWell: new Color(light ? '#ded0c2' : '#33251f'),
   eject: new Color(light ? '#b51d44' : '#fb7185'),
   rule: new Color(light ? '#c9c0b4' : '#50463e'),
   well: new Color(light ? '#d3ccc0' : '#1a1614'),
@@ -155,7 +154,7 @@ function gravityRows(agent, limit) {
 function bar(parent, width, height, remaining, detailed) {
   const view = slot(parent, width, height)
   view.cornerRadius = detailed ? 3 : height / 2
-  view.backgroundColor = detailed ? palette.well : palette.used
+  view.backgroundColor = detailed ? palette.cassetteWell : palette.used
   if (detailed) {
     view.borderWidth = 0.65
     view.borderColor = remaining === 0 ? palette.eject : palette.rule
@@ -168,7 +167,7 @@ function bar(parent, width, height, remaining, detailed) {
     }
     return
   }
-  const tint = remaining <= 0.25 ? palette.low : palette.remaining
+  const tint = palette.accent
   if (!detailed) {
     const fill = slot(view, Math.max(1, width * remaining), height)
     fill.backgroundColor = tint
@@ -187,7 +186,7 @@ function bar(parent, width, height, remaining, detailed) {
     const radius = side * (0.20 + 0.27 * fraction)
     canvas.setFillColor(color)
     canvas.fillEllipse(new Rect(x - radius, centerY - radius, radius * 2, radius * 2))
-    canvas.setFillColor(palette.well)
+    canvas.setFillColor(palette.cassetteWell)
     canvas.fillEllipse(new Rect(x - side * 0.19, centerY - side * 0.19, side * 0.38, side * 0.38))
     const spokes = new Path()
     for (let index = 0; index < 6; index++) {
@@ -611,19 +610,13 @@ function vinylWidget(card, data, status, now, family, art) {
   widget.backgroundImage = chassis(width, height, card === 'today' ? art : null, data)
 
   const header = slot(widget, 0, 18)
-  if (card === 'today') {
-    const dot = slot(header, 4, 4)
-    dot.cornerRadius = 2
-    dot.backgroundColor = palette.accent
-    header.addSpacer(4)
-  }
   text(header, {today:'今日用量', trend:'7 天趋势', quota:'套餐额度'}[card],
-    Font.boldSystemFont(family === 'large' ? 14 : 11), card === 'quota' ? palette.primary : palette.accent)
+    Font.boldSystemFont(family === 'large' ? 14 : 11), palette.accent)
   header.addSpacer()
   if (card === 'quota') {
     const dot = slot(header, 4, 4)
     dot.cornerRadius = 2
-    dot.backgroundColor = palette.remaining
+    dot.backgroundColor = palette.accent
     header.addSpacer(4)
     text(header, '剩余', Font.mediumSystemFont(8.5), palette.secondary)
   } else if (card === 'today' && data && hitRate(data) !== null) {

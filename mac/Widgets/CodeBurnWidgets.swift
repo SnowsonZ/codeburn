@@ -347,6 +347,12 @@ private enum VinylFinish: String {
     var lowTape: Color { light ? Color(rgb: 0xd97706) : self == .walnut ? Color(rgb: 0xfbbf24) : Color(rgb: 0xf59e0b) }
     var eject: Color { light ? Color(rgb: 0xb51d44) : Color(rgb: 0xfb7185) }
     var well: Color { light ? Color(rgb: 0xcec7bc).opacity(0.7) : Color.black.opacity(0.5) }
+    var cassetteWell: Color {
+        light ? Color(rgb: 0xd1b6a4).opacity(0.46) : Color(rgb: 0x402c24).opacity(0.68)
+    }
+    var usedTape: Color {
+        light ? Color(rgb: 0x998375).opacity(0.48) : Color(rgb: 0xa38476).opacity(0.29)
+    }
 
     var sleeves: [(UInt32, UInt32)] {
         switch self {
@@ -431,7 +437,6 @@ private struct WidgetCard: View {
     private var finish: VinylFinish { entry.finish == .system ? (colorScheme == .dark ? .dark : .silver) : entry.finish }
     private var secondaryColor: Color { finish.subtitle }
     private var ruleColor: Color { finish.ink.opacity(finish.light ? 0.16 : 0.18) }
-    private var remainingColor: Color { finish.tape }
     private var quotaIconSize: CGFloat { large ? 17 : 12 }
     private let quotaIconGap: CGFloat = 4
     private var quotaIdentityWidth: CGFloat { large ? 43 : 33 }
@@ -474,12 +479,9 @@ private struct WidgetCard: View {
 
     private var header: some View {
         HStack(spacing: 5) {
-            if card == .today {
-                Circle().fill(finish.orange).frame(width: 4.5, height: 4.5).accessibilityHidden(true)
-            }
             Text(card.title)
                 .font(.system(size: large ? 15 : 11.5, weight: .bold))
-                .foregroundStyle(card == .quota ? finish.ink : finish.orange)
+                .foregroundStyle(finish.orange)
                 .lineLimit(1).layoutPriority(1)
                 .accessibilityAddTraits(.isHeader)
             if card == .quota && wide {
@@ -491,14 +493,14 @@ private struct WidgetCard: View {
             Spacer(minLength: 1)
             if card == .quota {
                 HStack(spacing: 4) {
-                    Circle().fill(remainingColor).frame(width: 4, height: 4).accessibilityHidden(true)
+                    Circle().fill(finish.orange).frame(width: 4, height: 4).accessibilityHidden(true)
                     Text(copy("剩余", "Remaining"))
                 }
                 .font(.system(size: large ? 10 : 8.5, weight: .medium))
                 .foregroundStyle(secondaryColor)
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(finish.well, in: Capsule())
+                .background(finish.cassetteWell, in: Capsule())
             } else if card == .trend {
                 Text("LP CRATE").font(.system(size: 7, design: .monospaced))
                     .tracking(0.6).foregroundStyle(secondaryColor).accessibilityHidden(true)
@@ -1036,11 +1038,11 @@ private struct WidgetCard: View {
 
     private func cassette(_ window: QuotaWindow, height: CGFloat) -> some View {
         let proportion = window.remaining
-        let tint = proportion <= 0.25 ? finish.lowTape : finish.tape
+        let tint = finish.orange
         return GeometryReader { geometry in
             let spoolSize = min(geometry.size.height - 2, geometry.size.width * 0.21)
             ZStack {
-                RoundedRectangle(cornerRadius: 3).fill(finish.well)
+                RoundedRectangle(cornerRadius: 3).fill(finish.cassetteWell)
                 RoundedRectangle(cornerRadius: 3).strokeBorder(proportion == 0 ? finish.eject.opacity(0.64) : ruleColor, lineWidth: 0.7)
                 if proportion == 0 {
                     Text(copy("耗尽", "EJECT")).font(.system(size: height > 14 ? 8 : 6.5, weight: .bold, design: .monospaced))
@@ -1086,14 +1088,13 @@ private struct WidgetCard: View {
     }
 
     private func quotaBar(_ window: QuotaWindow, height: CGFloat = 4) -> some View {
-        tapeProgress(window.remaining, tint: window.remaining == 0 ? finish.eject :
-                     window.remaining <= 0.25 ? finish.lowTape : finish.tape, height: height)
+        tapeProgress(window.remaining, tint: finish.orange, height: height)
     }
 
     private func tapeProgress(_ remaining: Double, tint: Color, height: CGFloat, ticks: Bool = false) -> some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                Capsule().fill(finish.ink.opacity(0.13))
+                Capsule().fill(finish.usedTape)
                 Capsule().fill(tint).frame(width: geometry.size.width * remaining)
                     .animation(updateAnimation, value: remaining)
                 if ticks {
