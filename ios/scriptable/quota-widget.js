@@ -475,11 +475,11 @@ function chassis(width, height, art, usage, transparent = false) {
       canvas.setFillColor(colorAt(stops[left], stops[left + 1], progress - left))
       canvas.fillRect(new Rect(0, y, width, band))
     }
-    canvas.setFillColor(new Color('#ffffff', light ? 0.34 : 0.025))
-    for (let x = 0; x < width; x += 3) canvas.fillRect(new Rect(x, 0, 0.7, height))
   }
+  canvas.setFillColor(new Color('#ffffff', transparent ? 0.065 : light ? 0.34 : 0.025))
+  for (let x = 0; x < width; x += 3) canvas.fillRect(new Rect(x, 0, 0.7, height))
   if (art && usage) {
-    const side = Math.min(width, height * (transparent ? 1.31 : 1))
+    const side = Math.min(width, height)
     const left = width - side
     const scale = side / 222
     canvas.drawImageInRect(art, new Rect(left, height - side, side, side))
@@ -642,6 +642,7 @@ function vinylWidget(card, data, status, now, family, art) {
   const [width, height] = widgetSize(family)
   const contentWidth = width - 2 * inset
   widget.backgroundColor = palette.surface
+  let content = widget
   if (automatic) {
     const gradient = new LinearGradient()
     gradient.colors = chassisStops.light.map((hex, index) => Color.dynamic(
@@ -650,11 +651,20 @@ function vinylWidget(card, data, status, now, family, art) {
     gradient.startPoint = new Point(0, 0)
     gradient.endPoint = new Point(0.7, 1)
     widget.backgroundGradient = gradient
+    if (card === 'today' && art && data) {
+      // Keep the artwork behind the entire card, including the footer.
+      widget.setPadding(0, 0, 0, 0)
+      content = widget.addStack()
+      content.layoutVertically()
+      content.spacing = 0
+      content.setPadding(inset, inset, inset, inset)
+      content.backgroundImage = chassis(width, height, art, data, true)
+    }
   } else {
     widget.backgroundImage = chassis(width, height, card === 'today' ? art : null, data)
   }
 
-  const header = slot(widget, 0, 18)
+  const header = slot(content, 0, 18)
   text(header, {today:'今日用量', trend:'7 天趋势', quota:'套餐额度'}[card],
     Font.boldSystemFont(family === 'large' ? 14 : 11), palette.accent)
   header.addSpacer()
@@ -676,43 +686,29 @@ function vinylWidget(card, data, status, now, family, art) {
     text(header, 'LP CRATE', Font.mediumMonospacedSystemFont(7), palette.secondary)
   }
 
-  widget.addSpacer(4)
+  content.addSpacer(4)
   if (!data) {
-    widget.addSpacer()
-    text(widget, status ?? '等待数据同步', Font.mediumSystemFont(10), palette.secondary)
-    widget.addSpacer()
+    content.addSpacer()
+    text(content, status ?? '等待数据同步', Font.mediumSystemFont(10), palette.secondary)
+    content.addSpacer()
   } else if (card === 'today') {
-    if (automatic && art) {
-      const panel = widget.addStack()
-      panel.layoutVertically()
-      panel.spacing = 0
-      const bodyHeight = height - 2 * inset - 18 - 4 - 13 - 5
-      panel.size = new Size(contentWidth, bodyHeight)
-      panel.backgroundImage = chassis(contentWidth, bodyHeight, art, data, true)
-      todayPanel(panel, data, family, contentWidth)
-    } else {
-      todayPanel(widget, data, family, contentWidth)
-    }
+    todayPanel(content, data, family, contentWidth)
   } else if (card === 'trend') {
-    trendPanel(widget, data, family, contentWidth, height)
+    trendPanel(content, data, family, contentWidth, height)
   } else if (family === 'small') {
-    smallQuota(widget, data, now, contentWidth)
+    smallQuota(content, data, now, contentWidth)
   } else {
     const large = family === 'large'
     const tableBudget = height - (2 * inset + 18 + 4 + 13 + 8)
-    quotaTable(widget, data, now, contentWidth, tableBudget, large)
+    quotaTable(content, data, now, contentWidth, tableBudget, large)
   }
 
-  widget.addSpacer()
-  const foot = slot(widget, 0, 13)
-  text(foot, `上次刷新 ${updatedTime(data?.updatedAt, now)}`, Font.mediumSystemFont(8.5), palette.secondary)
-  if (data) {
-    const freshness = status ?? (now - Date.parse(data.updatedAt) > 20 * 60 * 1000 ? '数据待同步' : null)
-    if (freshness) {
-      foot.addSpacer()
-      text(foot, freshness, Font.mediumSystemFont(8.5), palette.secondary)
-    }
-  }
+  content.addSpacer()
+  const foot = slot(content, 0, 13)
+  const prefix = status === '显示缓存' ? '上次同步' : '上次刷新'
+  const stale = data && now - Date.parse(data.updatedAt) > 20 * 60 * 1000
+  text(foot, `${prefix} ${updatedTime(data?.updatedAt, now)}${stale ? ' · 待更新' : ''}`,
+    Font.mediumSystemFont(8.5), palette.secondary)
   return widget
 }
 
