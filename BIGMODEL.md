@@ -49,12 +49,12 @@ node ios/scriptable/install-mac.mjs https://device.tailnet.ts.net
 tailscale serve --bg --https=443 http://127.0.0.1:37461
 ```
 
-把示例主机名换成这台 Mac 的 Tailscale DNS 名。如果使用其他 HTTPS 端口，也要在第一条命令的地址里写明。第一条命令会生成一份已配对的 `.scriptable` 文件并注册用户级 LaunchAgent。接口只接受此脚本携带的随机访问密钥，只返回三个 Agent 的额度和刷新时间。重复安装沿用密钥。请通过 AirDrop 或个人文件空间传输脚本。
+把示例主机名换成这台 Mac 的 Tailscale DNS 名。如果使用其他 HTTPS 端口，也要在第一条命令的地址里写明。第一条命令会生成一份已配对的 JavaScript 文件并注册用户级 LaunchAgent。接口只接受此脚本携带的随机访问密钥，只返回三个 Agent 的额度和刷新时间。重复安装沿用密钥。脚本包含小组件的专用访问密钥，请仅传给自己的设备。
 
 ### 在 iPhone 上添加
 
 1. 安装 Scriptable 和 Tailscale，让 iPhone 加入 Mac 所使用的同一个 tailnet。
-2. 把 Mac 生成的 `CodeBurn 套餐额度.scriptable` 隔空投送到 iPhone，在「文件」里用分享菜单交给 Scriptable 导入。打开脚本运行一次可以预览。
+2. 在 Mac 用文本编辑器打开生成的 `CodeBurn 套餐额度.js`，全选并复制内容。在 iPhone 的 Scriptable 中点「+」，用通用剪贴板粘贴脚本，命名为「CodeBurn 套餐额度」并运行一次预览。如果已经启用 Scriptable 的 iCloud 同步，也可以自行把 JavaScript 文件放入「iCloud Drive → Scriptable」后打开 App。
 3. 长按 iPhone 主屏幕，添加大号 **Scriptable** 小组件。长按它并选择 **编辑小组件**，把 **Script** 设为 **CodeBurn 套餐额度**。
 
 Mac 休眠、断网或退出 CodeBurn 后，手机会继续显示最后取得的数据及其刷新时间。点按小组件可以在 Scriptable 中立即尝试读取。
