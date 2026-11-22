@@ -724,28 +724,40 @@ function trendPanel(widget, usage, family, width, widgetHeight, mastheadHeight) 
   display.imageSize = new Size(chartWidth, height + axisHeight)
 }
 
-function widgetMasthead(parent, card, title, rate, family) {
+function widgetStatus(card, data) {
+  if (card === 'quota') return '剩余'
+  if (!data) return null
+  if (card === 'today') {
+    const rate = hitRate(data)
+    return rate === null ? null : `Cache ${rate}%`
+  }
+  const [value, unit] = tokenParts(Math.max(...data.days.map(day => day.tokens)))
+  return ['Max', value, unit].filter(Boolean).join(' ')
+}
+
+function widgetMasthead(parent, card, title, status, family) {
   const large = family === 'large'
   const titleHeight = large ? 18 : 13
-  const statusHeight = large ? 12 : 9
-  const header = slot(parent, 0, titleHeight)
-  text(header, title, Font.boldSystemFont(large ? 15 : 11.5), palette.accent)
-  header.addSpacer(2)
-  header.addSpacer()
+  const captionHeight = large ? 12 : 9
+  const mastheadHeight = titleHeight + captionHeight
+  const header = slot(parent, 0, mastheadHeight)
+  const identity = header.addStack()
+  identity.layoutVertically()
+  identity.spacing = 0
+  text(slot(identity, 0, titleHeight), title, Font.boldSystemFont(large ? 15 : 11.5), palette.accent)
   const name = { today: 'TURNTABLE', trend: 'LP CRATE', quota: 'DUAL CASSETTE DECK' }[card]
-  const status = card === 'quota' ? '剩余' : card === 'today' && rate !== null ? `Cache ${rate}%` : null
+  const caption = slot(identity, 0, captionHeight)
+  text(caption, name, Font.mediumMonospacedSystemFont(large ? 9 : 7.5), palette.secondary).minimumScaleFactor = 0.7
+  header.addSpacer()
   if (status) {
     const dot = slot(header, 4, 4)
     dot.cornerRadius = 2
     dot.backgroundColor = palette.accent
     header.addSpacer(4)
     text(header, status, Font.mediumSystemFont(large ? 10 : 8.5), palette.secondary)
+    if (card === 'quota') header.addSpacer(family === 'small' ? 6 : 10)
   }
-  const caption = slot(parent, 0, statusHeight)
-  const equipmentFont = Font.mediumMonospacedSystemFont(large ? 9 : 7.5)
-  text(caption, name, equipmentFont, palette.secondary).minimumScaleFactor = 0.7
-  caption.addSpacer()
-  return titleHeight + statusHeight
+  return mastheadHeight
 }
 
 function vinylWidget(card, data, updatedAt, status, now, family, art) {
@@ -782,7 +794,7 @@ function vinylWidget(card, data, updatedAt, status, now, family, art) {
   const pastUsage = card !== 'quota' && data && data.day !== calendarKey(now)
   const title = pastUsage ? (card === 'today' ? '用量 ' : '趋势截至 ') + data.day.slice(5)
     : {today:'今日用量', trend:'7 天趋势', quota:'套餐额度'}[card]
-  const mastheadHeight = widgetMasthead(content, card, title, card === 'today' && data ? hitRate(data) : null, family)
+  const mastheadHeight = widgetMasthead(content, card, title, widgetStatus(card, data), family)
 
   content.addSpacer(4)
   if (!data) {

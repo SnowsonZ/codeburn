@@ -6,33 +6,52 @@ import { test } from 'node:test'
 const script = await readFile(new URL('./quota-widget.js', import.meta.url), 'utf8')
 const functions = script.slice(script.indexOf('function knownCount('), script.indexOf('function sum('))
 
-test('all equipment names sit below the title and status dots precede the short labels', () => {
-  const source = script.slice(script.indexOf('function widgetMasthead('), script.indexOf('function vinylWidget('))
-  const { widgetMasthead } = runInNewContext(source + '; ({ widgetMasthead })', {
+test('status aligns with the two-line masthead and quota keeps an extra right inset', () => {
+  const titleCode = script.slice(script.indexOf('function widgetStatus('), script.indexOf('function vinylWidget('))
+  const usageCode = script.slice(script.indexOf('function tokenParts('), script.indexOf('function calendarKey('))
+  function stack(width, height) {
+    return { children: [], width, height,
+      addStack() { const child = stack(); this.children.push(child); return child },
+      layoutVertically() { this.direction = 'vertical' },
+      addSpacer(size) { this.children.push({ spacer: size }) },
+    }
+  }
+  const { widgetMasthead, widgetStatus } = runInNewContext(usageCode + titleCode + '; ({ widgetMasthead, widgetStatus })', {
     palette: { accent: 'orange' },
     Font: new Proxy({}, { get: () => size => ({ size }) }),
+    sum: values => values.reduce((sum, value) => sum + value, 0),
     slot(parent, width, height) {
-      const row = { children: [], width, height, addSpacer() {} }
+      const row = stack(width, height)
       parent.children.push(row)
       return row
     },
     text(row, value) { row.children.push(value); return {} },
   })
-  const today = { children: [] }
-  widgetMasthead(today, 'today', '今日用量', 99, 'small')
-  assert.deepEqual(today.children.map(row => row.children.filter(x => typeof x === 'string')),
-    [['今日用量', 'Cache 99%'], ['TURNTABLE']])
-  assert.equal(today.children[0].children[1].backgroundColor, 'orange')
-  assert.equal(today.children[0].children[1].width, 4)
-  assert.equal(today.children[0].children[1].cornerRadius, 2)
-  const quota = { children: [] }
-  widgetMasthead(quota, 'quota', '套餐额度', null, 'medium')
-  assert.deepEqual(quota.children.map(row => row.children.filter(x => typeof x === 'string')),
-    [['套餐额度', '剩余'], ['DUAL CASSETTE DECK']])
-  assert.equal(quota.children[0].children[1].backgroundColor, 'orange')
-  const trend = { children: [] }
-  widgetMasthead(trend, 'trend', '7 天趋势', null, 'small')
-  assert.deepEqual(trend.children.map(row => row.children), [['7 天趋势'], ['LP CRATE']])
+  const stats = { agents: [{ input: 100, cached: 99 }],
+    days: [0, 5_000_000, 2_560_000_000, 8, 4, 2, 300_000_000].map(tokens => ({ tokens })) }
+  const cases = [
+    ['today', '今日用量', 'TURNTABLE', 'Cache 99%'],
+    ['quota', '套餐额度', 'DUAL CASSETTE DECK', '剩余'],
+    ['trend', '7 天趋势', 'LP CRATE', 'Max 2.56 B'],
+  ]
+  for (const [card, title, name, status] of cases) {
+    const root = stack()
+    assert.equal(widgetStatus(card, stats), status)
+    assert.equal(widgetMasthead(root, card, title, status, 'medium'), 22)
+    assert.equal(root.children.length, 1)
+    const [row] = root.children
+    const [identity, flexible, dot, gap, label, tail] = row.children
+    assert.equal(identity.direction, 'vertical')
+    assert.deepEqual(identity.children.flatMap(child => child.children), [title, name])
+    assert.equal(flexible.spacer, undefined)
+    assert.equal(dot.backgroundColor, 'orange')
+    assert.equal(dot.cornerRadius, 2)
+    assert.equal(gap.spacer, 4)
+    assert.equal(label, status)
+    assert.equal(tail?.spacer, card === 'quota' ? 10 : undefined)
+  }
+  assert.equal(widgetStatus('trend', null), null)
+  assert.equal(widgetStatus('trend', { days: Array.from({ length: 7 }, () => ({ tokens: 0 })) }), 'Max 0')
 })
 
 test('both usage totals share one baseline and use smaller plural Tokens', () => {
