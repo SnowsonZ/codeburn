@@ -21,6 +21,9 @@ struct SnapshotValidationTest {
         precondition(VinylFinish.system.resolved(for: .light) == .silver)
         precondition(VinylFinish.dark.resolved(for: .dark) == .dark)
         precondition(VinylFinish.walnut.resolved(for: .light) == .walnut)
+        let compactGrid = QuotaGridMetrics(height: 77, large: false, accountRows: 2, modelRows: 3, hasAntigravity: true)
+        precondition(compactGrid.modelLimit == 3)
+        precondition(5 * compactGrid.rowHeight + compactGrid.dividerHeight + 6 * compactGrid.spacing + compactGrid.headingHeight <= 77)
 
         let timestamp = "2026-11-20T16:00:00.000Z"
         let ids = ["codex", "zcode", "antigravity"]

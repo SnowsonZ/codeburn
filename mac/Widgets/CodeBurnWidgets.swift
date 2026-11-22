@@ -456,11 +456,13 @@ private struct QuotaGridMetrics {
         headingHeight = large ? 17 : 12
         let budget = max(0, height - headingHeight)
         let providerRow = hasAntigravity ? 1 : 0
-        let capacity = max(0, Int(budget / (large ? 19 : 11)) - accountRows - providerRow)
+        let dividerCount = hasAntigravity && modelRows > 0 ? 1 : 0
+        let dividerBudget = CGFloat(dividerCount) * (large ? 19 : 9)
+        let fixedDataRows = accountRows + providerRow - dividerCount
+        let capacity = max(0, Int(max(0, budget - dividerBudget) / (large ? 19 : 11)) - fixedDataRows)
         let limit = min(modelRows, capacity)
         modelLimit = limit
-        let dividerCount = hasAntigravity && modelRows > 0 ? 1 : 0
-        let dataRows = CGFloat(max(1, accountRows + providerRow + limit - dividerCount))
+        let dataRows = CGFloat(max(1, fixedDataRows + limit))
         let rowCount = dataRows + CGFloat(dividerCount)
         let pitch = budget / rowCount
         let gap: CGFloat = large && pitch >= 24 ? 4 : pitch >= 16 ? 2 : 1
