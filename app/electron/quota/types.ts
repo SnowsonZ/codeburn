@@ -15,6 +15,8 @@ export type QuotaProvider = {
   details: QuotaWindow[]
   planLabel: string | null
   footerLines: string[]
+  /** Display provenance for the desktop quota service, which can cache rows. */
+  source?: 'antigravity-cli'
   /** Set when the provider is in a 429 backoff window (rate limited by the
    *  upstream quota endpoint), so the UI can say so honestly instead of the
    *  generic "waiting" copy. */

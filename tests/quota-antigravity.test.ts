@@ -58,16 +58,21 @@ describe.each([['CLI', cli], ['Electron', desktop]] as const)('%s Antigravity 2.
     ])
   })
 
-  it('prefers the current label and falls back to legacy modelName for absent or blank labels', () => {
+  it('uses the first nonblank model label or identifier and requires a quota fraction', () => {
     const configs = [
       { label: 'Current name', modelName: 'legacy-id', quotaInfo: { remainingFraction: 0 } },
       { label: ' ', modelName: 'Legacy name', quotaInfo: { remainingFraction: 0.5 } },
       { modelName: 'Old model', quotaInfo: { remainingFraction: 1 } },
+      { modelId: 'fixture-id', modelOrAlias: { model: 'alias' }, quotaInfo: { remainingFraction: 0.25 } },
+      { modelId: ' ', modelOrAlias: { model: 'fixture-alias' }, quotaInfo: { remainingFraction: 0.75 } },
+      { modelId: 'missing-fraction', quotaInfo: {} },
     ]
     expect(reader.decodeAntigravityStatus({ userStatus: { cascadeModelConfigData: { clientModelConfigs: configs } } })).toEqual([
       { label: 'Current name', percent: 1, resetsAt: null },
       { label: 'Legacy name', percent: 0.5, resetsAt: null },
       { label: 'Old model', percent: 0, resetsAt: null },
+      { label: 'fixture-id', percent: 0.75, resetsAt: null },
+      { label: 'fixture-alias', percent: 0.25, resetsAt: null },
     ])
   })
 

@@ -3,7 +3,7 @@ import path from 'node:path'
 
 import { readBigModelApiKey } from '../bigmodel-key'
 import { reportWidgetDiagnostic, type WidgetDiagnostic } from '../widget-snapshot'
-import { fetchAntigravityQuota } from './antigravity'
+import { fetchAntigravityQuotaWithCli } from './antigravity'
 import { fetchCodexQuota } from './codex'
 import { readSecureFile } from './security'
 import type { QuotaProvider } from './types'
@@ -20,13 +20,22 @@ type Options = {
   diagnostic?: WidgetDiagnostic
 }
 
+export async function pollWidgetAntigravityQuota(
+  signal: AbortSignal, deps?: Parameters<typeof fetchAntigravityQuotaWithCli>[0],
+): Promise<Result> {
+  // This attempt owns the direct probe and any CLI execution. Keep the source
+  // tag on Plans rows so the widget's freshness checks reject those rows.
+  const { source: _source, ...quota } = await fetchAntigravityQuotaWithCli({ ...deps, signal })
+  return { quota }
+}
+
 const defaults: Options = {
   poll: {
     // Background Codex auth may renew normally, but does not request keychain access.
     // The provider only shares the credential grant; this quota read is new.
     codex: signal => fetchCodexQuota({ signal }),
     zcode: signal => fetchZcodeQuota({ signal, readBigModelApiKey: process.platform === 'darwin' ? readBigModelApiKey : undefined }),
-    antigravity: async signal => ({ quota: await fetchAntigravityQuota({ signal }) }),
+    antigravity: pollWidgetAntigravityQuota,
   },
   readBackoff: async () => {
     const state = await readSecureFile(path.join(os.homedir(), '.codeburn', 'quota-backoff.json'), 16 * 1024)
@@ -85,8 +94,8 @@ export function createWidgetQuotaReader(options: Partial<Options> = {}): (signal
               reportWidgetDiagnostic(diagnostic, { stage: 'quota', result: 'backoff', provider: id })
               throw new Error('Widget quota rate limited')
             }
-            if (quota.provider !== id || quota.connection !== 'connected' || quota.rateLimited) {
-              const result = quota.provider !== id ? 'not_fresh'
+            if (quota.provider !== id || quota.source === 'antigravity-cli' || quota.connection !== 'connected' || quota.rateLimited) {
+              const result = quota.provider !== id || quota.source === 'antigravity-cli' ? 'not_fresh'
                 : quota.rateLimited ? 'backoff' : quota.connection === 'disconnected' ? 'disconnected' : 'not_fresh'
               reportWidgetDiagnostic(diagnostic, { stage: 'quota', result, provider: id })
               throw new Error('Widget quota not fresh')

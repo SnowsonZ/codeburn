@@ -2,7 +2,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { readBigModelApiKey } from '../bigmodel-key'
-import { fetchAntigravityQuota } from './antigravity'
+import { fetchAntigravityQuotaWithCli } from './antigravity'
 import { claudeConfigDir, fetchClaudeQuota } from './claude'
 import { fetchCodexQuota } from './codex'
 import { fetchCopilotQuota } from './copilot'
@@ -43,9 +43,7 @@ const defaultDeps: QuotaDeps = {
   codex: fetchCodexQuota,
   gemini: fetchGeminiQuota,
   copilot: fetchCopilotQuota,
-  // The Antigravity probe talks only to localhost surfaces (no credentials,
-  // no remote endpoints), so it ignores the abort/keychain options entirely.
-  antigravity: async () => ({ quota: await fetchAntigravityQuota() }),
+  antigravity: async ({ signal }) => ({ quota: await fetchAntigravityQuotaWithCli({ signal }) }),
   kimi: fetchKimiQuota,
   zcode: options => fetchZcodeQuota({
     ...options,
@@ -166,7 +164,7 @@ export class QuotaService {
         if (!allowKeychain && next.connection === 'keychainUnchecked'
           && (previous?.connection === 'connected' || previous?.connection === 'accessDenied'
             || previous?.connection === 'terminalFailure')) return previous
-        if (previous?.connection !== 'connected') return next
+        if (previous?.connection !== 'connected' || previous.source === 'antigravity-cli') return next
         // Keychain-only credentials are invisible to a background (keychain-less)
         // poll; keep showing the live connection rather than flapping to
         // disconnected. A forced refresh re-reads the keychain and reveals truth.

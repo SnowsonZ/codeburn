@@ -116,6 +116,22 @@ describe('QuotaService', () => {
     })
   })
 
+  it('does not reuse an old Antigravity CLI result after a rejected refresh', async () => {
+    const fetchers = noopFetchers()
+    const first: QuotaProvider = {
+      ...quota('antigravity'), source: 'antigravity-cli',
+      primary: { label: 'Weekly', percent: 1, resetsAt: null },
+    }
+    const rejected: QuotaProvider = { ...quota('antigravity'), connection: 'disconnected' }
+    fetchers.antigravity.mockResolvedValueOnce({ quota: first }).mockResolvedValueOnce({ quota: rejected })
+    const service = new QuotaService({
+      ...fetchers, refreshMs: 0, grokbotInstalled: () => false,
+      readFile: async () => null,
+    })
+    expect((await service.getQuota()).find(row => row.provider === 'antigravity')).toEqual(first)
+    expect((await service.getQuota()).find(row => row.provider === 'antigravity')).toEqual(rejected)
+  })
+
   it('holds a live connection through an unchecked-keychain background poll', async () => {
     const fetchers = noopFetchers()
     let now = 1000

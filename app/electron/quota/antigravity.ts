@@ -19,7 +19,8 @@ import http from 'node:http'
 import https from 'node:https'
 import { promisify } from 'node:util'
 
-import { fraction, sanitizeError } from './security'
+import { createAntigravityCliReader } from './antigravity-cli'
+import { sanitizeError } from './security'
 import type { QuotaProvider, QuotaWindow } from './types'
 
 const SUMMARY_PATH = '/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary'
@@ -202,9 +203,9 @@ function resetTimeOf(value: unknown): string | null {
 }
 
 function windowOf(label: string, remainingFraction: unknown, resetTime?: unknown): QuotaWindow | null {
-  const remaining = fraction(typeof remainingFraction === 'number' ? (1 - remainingFraction) * 100 : NaN)
-  if (remaining === null) return null
-  return { label, percent: remaining, resetsAt: resetTimeOf(resetTime ?? null) }
+  if (typeof remainingFraction !== 'number' || !Number.isFinite(remainingFraction) ||
+    remainingFraction < 0 || remainingFraction > 1) return null
+  return { label, percent: 1 - remainingFraction, resetsAt: resetTimeOf(resetTime) }
 }
 
 /** Preferred payload: two named quota groups of model buckets. */
@@ -216,6 +217,7 @@ export function decodeAntigravitySummary(body: unknown): QuotaWindow[] {
   for (const group of Array.isArray(groups) ? groups : []) {
     const groupName = typeof group?.displayName === 'string' ? group.displayName : ''
     for (const bucket of Array.isArray(group?.buckets) ? group.buckets : []) {
+      if (bucket?.disabled === true) continue
       const name = [groupName, typeof bucket?.displayName === 'string' ? bucket.displayName : bucket?.bucketId]
         .filter(Boolean).join(' · ')
       if (!name) continue
@@ -236,9 +238,9 @@ export function decodeAntigravityStatus(body: unknown): QuotaWindow[] {
   const configs = data.userStatus?.cascadeModelConfigData?.clientModelConfigs
   const windows: QuotaWindow[] = []
   for (const config of Array.isArray(configs) ? configs : []) {
-    // Current servers expose the display name as `label`, not `modelName`.
-    const name = typeof config?.label === 'string' && config.label.trim() ? config.label
-      : typeof config?.modelName === 'string' ? config.modelName : ''
+    if (config?.disabled === true || config?.quotaInfo?.disabled === true) continue
+    const name = [config?.label, config?.modelName, config?.modelId, config?.modelOrAlias?.model]
+      .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
     if (!name) continue
     const window = windowOf(name, config?.quotaInfo?.remainingFraction, config?.quotaInfo?.resetTime)
     if (window) windows.push(window)
@@ -314,5 +316,26 @@ export async function fetchAntigravityQuota(deps: Partial<AntigravityDeps> = {})
     if (resolved.signal?.aborted) return empty('transientFailure')
     console.warn(`Antigravity quota unavailable: ${sanitizeError(error)}`)
     return empty('transientFailure')
+  }
+}
+
+const readOfficialCli = createAntigravityCliReader()
+
+/** Probe the local servers first, then start a new official CLI read if needed. */
+export async function fetchAntigravityQuotaWithCli(
+  { cli = readOfficialCli, ...deps }: Partial<AntigravityDeps> & { cli?: typeof readOfficialCli } = {},
+): Promise<QuotaProvider> {
+  const direct = await fetchAntigravityQuota(deps)
+  if (direct.connection === 'connected' || deps.signal?.aborted) return direct
+  const windows = await cli(deps.signal)
+  if (deps.signal?.aborted) return empty('transientFailure')
+  if (!windows.length) return direct
+  const details = [...windows].sort((a, b) => b.percent - a.percent)
+  return {
+    ...empty('connected'),
+    source: 'antigravity-cli',
+    primary: details[0]!,
+    details,
+    footerLines: ['Source: Antigravity CLI /usage'],
   }
 }

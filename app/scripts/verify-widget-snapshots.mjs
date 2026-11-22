@@ -10,6 +10,7 @@ import { test } from 'node:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 
+import antigravityCliUsage from '../electron/quota/fixtures/antigravity-cli-usage.json' with { type: 'json' }
 
 registerHooks({
   resolve(specifier, context, next) {
@@ -23,7 +24,9 @@ registerHooks({
   },
 })
 const { reportWidgetDiagnostic, startWidgetSnapshots, WIDGET_AGENTS } = await import('../electron/widget-snapshot.ts')
-const { createWidgetQuotaReader } = await import('../electron/quota/widget-refresh.ts')
+const { createWidgetQuotaReader, pollWidgetAntigravityQuota } = await import('../electron/quota/widget-refresh.ts')
+const { fetchAntigravityQuota, fetchAntigravityQuotaWithCli } = await import('../electron/quota/antigravity.ts')
+const { createAntigravityCliReader } = await import('../electron/quota/antigravity-cli.ts')
 const { fetchCodexQuota } = await import('../electron/quota/codex.ts')
 const { spawnCli } = await import('../electron/cli.ts')
 const { fetchZcodeQuota } = await import('../electron/quota/zcode.ts')
@@ -187,6 +190,193 @@ test('a hung usage read reports the round deadline and preserves the old generat
   })
   await until(() => reasons.some(reason => reason.stage === 'round'))
   assert.deepEqual(reasons.slice(2), [{ stage: 'round', result: 'deadline' }])
+  assert.equal(await f.bytes(), baseline)
+})
+test('Antigravity status fallback commits valid model windows and preserves the prior generation when quota is missing', async t => {
+  const f = await fixture(t)
+  const readQuota = (configs, settled = () => {}) => async signal => {
+    signal.addEventListener('abort', settled, { once: true })
+    const antigravity = await fetchAntigravityQuota({
+      platform: 'darwin',
+      signal,
+      execFile: async file => ({
+        stdout: file === 'ps'
+          ? '1234 /antigravity/language_server --app_data_dir antigravity --csrf_token fixture --extension_server_port 54321'
+          : '',
+      }),
+      request: async (_port, _tls, route) => ({
+        status: 200,
+        text: JSON.stringify(route.endsWith('/GetUserStatus')
+          ? { userStatus: { cascadeModelConfigData: { clientModelConfigs: configs } } }
+          : { response: { groups: [] } }),
+      }),
+    })
+    return [...quota.slice(0, 2), antigravity]
+  }
+
+  const missing = [{ modelId: 'missing-fraction', quotaInfo: {} }]
+  const first = deferred()
+  const stopFirst = f.start(zeroUsage, readQuota(missing, first.resolve))
+  await first.promise
+  assert.equal(await f.bytes(), null)
+  stopFirst()
+
+  const stopComplete = f.start(zeroUsage, readQuota([
+    { label: ' ', modelId: 'fixture-id', quotaInfo: { remainingFraction: 1 } },
+    { modelOrAlias: { model: 'fixture-alias' }, quotaInfo: { remainingFraction: 0.5 } },
+  ]))
+  await until(f.bytes)
+  const baseline = await f.bytes()
+  const snapshot = JSON.parse(baseline)
+  assertComplete(snapshot)
+  assert.deepEqual(snapshot.quota.agents[2].windows, [
+    { label: 'fixture-alias', percent: 0.5, resetsAt: null },
+    { label: 'fixture-id', percent: 0, resetsAt: null },
+  ])
+  stopComplete()
+
+  const later = deferred()
+  f.start(async () => usage(500), readQuota(missing, later.resolve), {
+    now: () => new Date(base.getTime() + 10_000),
+  })
+  await later.promise
+  assert.equal(await f.bytes(), baseline)
+})
+const unavailableAntigravity = { platform: 'darwin', execFile: async () => ({ stdout: '' }), request: forbidden }
+const officialUsage = JSON.stringify(antigravityCliUsage)
+function widgetReader(antigravity, diagnostic, rows = quota) {
+  return createWidgetQuotaReader({ readBackoff: async () => null, diagnostic, poll: {
+    codex: async () => ({ quota: rows[0] }),
+    zcode: async () => ({ quota: rows[1] }),
+    antigravity,
+  } })
+}
+
+test('widget retries Antigravity with a new official command and commits all three providers together', async t => {
+  const f = await fixture(t)
+  const initial = f.start(zeroUsage, readyQuota)
+  await until(f.bytes)
+  initial()
+  const oldBytes = await f.bytes()
+
+  let output, directReady = false
+  const calls = []
+  const run = async (_file, args) => {
+    calls.push(args[0] === '--version' ? '--version' : args[args.indexOf('-p') + 1])
+    if (args[0] === '--version') return '1.5.14'
+    if (output === undefined) throw Error('fixture CLI unavailable')
+    return output
+  }
+  const cli = createAntigravityCliReader({ executable: async () => '/fixture/.local/bin/agy', run })
+  const deps = { ...unavailableAntigravity, cli,
+    execFile: async file => ({ stdout: directReady && file === 'ps'
+      ? '1234 /antigravity/language_server --app_data_dir antigravity --csrf_token fixture --extension_server_port 54321' : '' }),
+    request: async () => ({ status: 200, text: JSON.stringify({ groups: [{ displayName: 'Direct', buckets: [
+      { bucketId: 'week', remainingFraction: 0.25 },
+    ] }] }) }),
+  }
+
+  const reasons = []
+  const diagnostic = event => reasons.push(event)
+  const sawAntigravity = result => reasons.some(event => event.stage === 'quota' && event.provider === 'antigravity' && event.result === result)
+  const rows = quota.map((row, i) => ({ ...row, primary: { ...window, percent: (i + 1) / 4 } }))
+  const reader = widgetReader(signal => pollWidgetAntigravityQuota(signal, deps), diagnostic, rows)
+  const recoveredAt = new Date(base.getTime() + 10_000)
+  const start = (readQuota, offset = 0) => f.start(async args => usage(500 + WIDGET_AGENTS.indexOf(args[args.indexOf('--provider') + 1])), readQuota, {
+    now: () => new Date(recoveredAt.getTime() + offset), diagnostic,
+  })
+  const invalid = structuredClone(antigravityCliUsage)
+  delete invalid.command.data.groups[0].buckets[1].remaining_fraction
+  const disabled = structuredClone(antigravityCliUsage)
+  disabled.command.data.groups = [{ name: 'Optional', buckets: [{ disabled: true }] }]
+  for (const response of [undefined, '{invalid', JSON.stringify(invalid), JSON.stringify(disabled)]) {
+    output = response
+    reasons.length = 0
+    const stop = start(reader)
+    await until(() => sawAntigravity('disconnected'))
+    stop()
+    assert.equal(await f.bytes(), oldBytes)
+  }
+  assert.deepEqual(calls, Array.from({ length: 4 }, () => ['--version', '/usage']).flat())
+
+  output = officialUsage
+  const desktop = await fetchAntigravityQuotaWithCli(deps)
+  assert.equal(desktop.source, 'antigravity-cli')
+  assert.equal(desktop.details.length, 4)
+  for (const cached of [widgetReader(async () => ({ quota: desktop }), diagnostic), async () => [quota[0], quota[1], desktop]]) {
+    reasons.length = 0
+    const stop = start(cached)
+    await until(() => sawAntigravity('not_fresh'))
+    stop()
+    assert.equal(await f.bytes(), oldBytes)
+  }
+
+  const recovered = start(reader)
+  await until(async () => (await f.bytes()) !== oldBytes)
+  const snapshot = await f.snapshot()
+  assertComplete(snapshot)
+  assert.equal(snapshot.updatedAt, recoveredAt.toISOString())
+  assert.deepEqual(snapshot.usage.agents.map(row => row.tokens), [500, 501, 502])
+  assert.deepEqual(snapshot.quota.agents.map(row => row.windows.map(window => window.percent)), [[0.25], [0.5], [1, 0.5, 0.25, 0]])
+  assert.equal(snapshot.quota.agents[2].windows[0].resetsAt, '2026-11-24T12:00:00.000Z')
+  assert.equal(calls.length, 12)
+  recovered()
+
+  directReady = true
+  start(reader, 1_000)
+  await until(async () => (await f.snapshot()).updatedAt !== snapshot.updatedAt)
+  assert.deepEqual((await f.snapshot()).quota.agents[2].windows, [{ label: 'Direct · week', percent: 0.75, resetsAt: null }])
+  assert.equal(calls.length, 12)
+})
+
+test('widget keeps old bytes while the CLI is busy and after a cancelled command returns late', async t => {
+  const f = await fixture(t)
+  const seed = f.start(zeroUsage, readyQuota)
+  await until(f.bytes)
+  seed()
+  const baseline = await f.bytes()
+  let entered = deferred(), response = deferred()
+  let commands = 0
+  const cli = createAntigravityCliReader({ executable: async () => '/fixture/.local/bin/agy', run: async (_file, args, signal) => {
+    if (args[0] === '--version') return '1.5.14'
+    commands++
+    entered.resolve(signal)
+    return response.promise
+  } })
+  const deps = { ...unavailableAntigravity, cli }
+  const reasons = []
+  const diagnostic = event => reasons.push(event)
+  const reader = widgetReader(signal => pollWidgetAntigravityQuota(signal, deps), diagnostic)
+  const start = (timeoutMs = 90_000) => f.start(async () => usage(500), reader, {
+    now: () => new Date(base.getTime() + 10_000), timeoutMs, diagnostic,
+  })
+  const expectBusy = async () => {
+    reasons.length = 0
+    const stop = start()
+    await until(() => reasons.some(event => event.stage === 'quota' && event.provider === 'antigravity' && event.result === 'disconnected'))
+    stop()
+    assert.equal(await f.bytes(), baseline)
+  }
+
+  const plans = fetchAntigravityQuotaWithCli(deps)
+  await entered.promise
+  await expectBusy()
+  assert.equal(commands, 1)
+  response.resolve(officialUsage)
+  assert.equal((await plans).source, 'antigravity-cli')
+  assert.equal(await f.bytes(), baseline)
+
+  entered = deferred()
+  response = deferred()
+  const cancelled = start(75)
+  const cliSignal = await entered.promise
+  await until(() => reasons.some(event => event.stage === 'round' && event.result === 'deadline'))
+  assert.equal(cliSignal.aborted, true)
+  cancelled()
+  await expectBusy()
+  assert.equal(commands, 2)
+  response.resolve(officialUsage)
+  await sleep(0)
   assert.equal(await f.bytes(), baseline)
 })
 test('old bytes unchanged for timeout; retry succeeds; late work cannot replace recovery', async t => {

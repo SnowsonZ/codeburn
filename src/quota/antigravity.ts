@@ -234,9 +234,8 @@ export function decodeAntigravityStatus(body: unknown): QuotaWindow[] {
   const configs = data.userStatus?.cascadeModelConfigData?.clientModelConfigs
   const windows: QuotaWindow[] = []
   for (const config of Array.isArray(configs) ? configs : []) {
-    // Current servers expose the display name as `label`, not `modelName`.
-    const name = typeof config?.label === 'string' && config.label.trim() ? config.label
-      : typeof config?.modelName === 'string' ? config.modelName : ''
+    const name = [config?.label, config?.modelName, config?.modelId, config?.modelOrAlias?.model]
+      .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
     if (!name) continue
     const window = windowOf(name, config?.quotaInfo?.remainingFraction, config?.quotaInfo?.resetTime)
     if (window) windows.push(window)
