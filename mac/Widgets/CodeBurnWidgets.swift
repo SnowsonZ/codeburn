@@ -492,6 +492,7 @@ private struct WidgetCard: View {
     private var quotaIconSize: CGFloat { large ? 17 : 12 }
     private let quotaIconGap: CGFloat = 4
     private var quotaIdentityWidth: CGFloat { large ? 43 : 33 }
+    private var quotaValueGap: CGFloat { large ? 7 : 4 }
     private var inset: CGFloat { wide ? 14 : 11 }
     private var updateAnimation: Animation? { reduceMotion ? nil : .easeOut(duration: 0.32) }
     private var usage: UsageSnapshot? { entry.snapshot?.usage }
@@ -534,7 +535,7 @@ private struct WidgetCard: View {
     }
 
     private var header: some View {
-        VStack(alignment: .trailing, spacing: 2) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(cardTitle)
                     .font(.system(size: large ? 15 : 11.5, weight: .bold))
@@ -542,43 +543,46 @@ private struct WidgetCard: View {
                     .lineLimit(1).layoutPriority(1)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
-                Text(equipmentName)
-                    .font(.system(size: large ? 8.5 : 7, weight: .medium, design: .monospaced))
-                    .tracking(0.5).foregroundStyle(secondaryColor)
-                    .lineLimit(1).minimumScaleFactor(0.68)
-                    .accessibilityHidden(true)
+                if card == .trend {
+                    equipmentLabel
+                } else {
+                    headerStatus
+                        .font(.system(size: large ? 10 : 8, weight: .medium))
+                        .foregroundStyle(secondaryColor)
+                        .lineLimit(1)
+                }
             }
-            headerStatus
-                .font(.system(size: large ? 10 : 8, weight: .medium))
-                .foregroundStyle(secondaryColor)
-                .lineLimit(1)
-                .frame(height: large ? 12 : 9)
+            HStack {
+                if card != .trend { equipmentLabel }
+                Spacer(minLength: 0)
+            }
+            .frame(height: large ? 12 : 9)
         }
     }
 
-    private var equipmentName: String {
-        switch card {
+    private var equipmentLabel: some View {
+        let name = switch card {
         case .today: "TURNTABLE"
         case .trend: "LP CRATE"
         case .quota: "DUAL CASSETTE DECK"
         }
+        return Text(name)
+            .font(.system(size: large ? 8.5 : 7, weight: .medium, design: .monospaced))
+            .tracking(0.5).foregroundStyle(secondaryColor)
+            .lineLimit(1).minimumScaleFactor(0.68)
+            .accessibilityHidden(true)
     }
 
     @ViewBuilder
     private var headerStatus: some View {
         if card == .quota {
-            HStack(spacing: 5) {
-                Text(copy("剩余", "Remaining"))
-                tapeProgress(0.5, tint: finish.orange, height: large ? 5 : 4)
-                    .frame(width: large ? 34 : 25)
-            }
+            Text(copy("剩余", "Remaining"))
         } else if card == .today, let rate = usage?.cacheRate {
-            Text(copy("缓存命中", "Cache hit") + " " + percent(rate))
+            Text(copy("命中", "Hit") + " " + percent(rate))
                 .monospacedDigit()
                 .contentTransition(reduceMotion ? .identity : .numericText(value: rate * 100))
                 .animation(updateAnimation, value: rate)
-        } else {
-            Color.clear.frame(width: 1).accessibilityHidden(true)
+                .accessibilityLabel(copy("缓存命中率", "Cache hit rate") + " " + percent(rate))
         }
     }
 
@@ -863,8 +867,8 @@ private struct WidgetCard: View {
             Grid(alignment: .leading, horizontalSpacing: gap, verticalSpacing: metrics.spacing) {
                 GridRow {
                     Color.clear.frame(width: quotaIdentityWidth, height: 1).accessibilityHidden(true)
-                    periodLabel(.fiveHours).frame(width: column)
-                    periodLabel(.weekly).frame(width: column)
+                    quotaColumnHeading(.fiveHours, column: column, metrics: metrics)
+                    quotaColumnHeading(.weekly, column: column, metrics: metrics)
                 }
                 .frame(height: metrics.headingHeight)
                 ForEach(accounts, id: \.id) { account in
@@ -984,6 +988,12 @@ private struct WidgetCard: View {
             .lineLimit(1)
     }
 
+    private func quotaColumnHeading(_ period: QuotaPeriod, column: CGFloat, metrics: QuotaGridMetrics) -> some View {
+        periodLabel(period)
+            .frame(width: max(0, column - metrics.valueWidth - quotaValueGap))
+            .frame(width: column, alignment: .leading)
+    }
+
     private func modelIcon(_ group: String, size: CGFloat) -> some View {
         let name = group.lowercased()
         let claude = name.contains("claude")
@@ -1064,7 +1074,7 @@ private struct WidgetCard: View {
     private func quotaCell(_ window: QuotaWindow?, metrics: QuotaGridMetrics, period: QuotaPeriod? = nil) -> some View {
         if let window {
             let expired = !window.isActive(at: entry.date)
-            HStack(spacing: large ? 7 : 4) {
+            HStack(spacing: quotaValueGap) {
                 cassette(window, height: metrics.barHeight).opacity(expired ? 0.55 : 1)
                 if expired { expiredQuotaBadge }
                 remainingValue(window, expired: expired).frame(width: metrics.valueWidth, alignment: .trailing)

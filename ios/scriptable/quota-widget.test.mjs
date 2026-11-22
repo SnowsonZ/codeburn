@@ -6,6 +6,26 @@ import { test } from 'node:test'
 const script = await readFile(new URL('./quota-widget.js', import.meta.url), 'utf8')
 const functions = script.slice(script.indexOf('function knownCount('), script.indexOf('function sum('))
 
+test('the usage and quota mastheads keep the right status compact', () => {
+  const source = script.slice(script.indexOf('function widgetMasthead('), script.indexOf('function vinylWidget('))
+  const { widgetMasthead } = runInNewContext(source + '; ({ widgetMasthead })', {
+    palette: {},
+    Font: new Proxy({}, { get: () => size => ({ size }) }),
+    slot(parent) {
+      const row = { children: [], addSpacer() {} }
+      parent.children.push(row)
+      return row
+    },
+    text(row, value) { row.children.push(value); return {} },
+  })
+  const today = { children: [] }
+  widgetMasthead(today, 'today', '今日用量', 99, 'small')
+  assert.deepEqual(today.children.map(row => row.children), [['今日用量', '命中 99%'], ['TURNTABLE']])
+  const quota = { children: [] }
+  widgetMasthead(quota, 'quota', '套餐额度', null, 'medium')
+  assert.deepEqual(quota.children.map(row => row.children), [['套餐额度', '剩余'], ['DUAL CASSETTE DECK']])
+})
+
 test('both usage totals share one baseline and use smaller plural Tokens', () => {
   const functions = script.slice(script.indexOf('function tokenParts('), script.indexOf('function hitRate('))
   const palette = { primary: 'number', secondary: 'caption', accent: 'accent' }

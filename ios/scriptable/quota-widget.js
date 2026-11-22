@@ -236,27 +236,32 @@ function compactQuotaWindow(agent, updatedAt) {
   return windows[0] ?? agent.windows[0]
 }
 
+const quotaValueGap = 5
+
+function quotaValueWidth(valueSize) {
+  // Reserve four monospaced characters plus a small inset for 100%.
+  return Math.ceil(valueSize * 3.1 + 3)
+}
+
 function quotaCell(parent, width, rowHeight, valueSize, window, now, label) {
   const view = slot(parent, width, rowHeight)
   if (!window) return
   const expired = quotaExpired(window, now)
   const amount = `${Math.round((1 - window.percent) * 100)}%`
-  // Reserve four monospaced characters plus a small inset for 100%.
-  const numberWidth = Math.ceil(valueSize * 3.1 + 3)
+  const numberWidth = quotaValueWidth(valueSize)
   const oldWidth = expired ? 30 : 0
-  const numberGap = 5
-  let barWidth = width - numberWidth - numberGap - oldWidth
+  let barWidth = width - numberWidth - quotaValueGap - oldWidth
   if (label) {
     const labelWidth = Math.min(78, Math.floor(width * 0.32))
     const labelSlot = slot(view, labelWidth, rowHeight)
     text(labelSlot, label === 'Session' ? '会话' : label, Font.mediumSystemFont(Math.min(10, valueSize)), palette.secondary)
     labelSlot.addSpacer()
-    barWidth -= labelWidth + numberGap
-    view.addSpacer(numberGap)
+    barWidth -= labelWidth + quotaValueGap
+    view.addSpacer(quotaValueGap)
   }
   const barHeight = Math.min(rowHeight - 2, Math.round(valueSize * 1.17))
   bar(view, Math.max(2, barWidth), barHeight, Math.max(0, 1 - window.percent), true)
-  view.addSpacer(numberGap)
+  view.addSpacer(quotaValueGap)
   if (expired) text(slot(view, oldWidth, rowHeight), '已过期', Font.mediumSystemFont(8), palette.secondary)
   const value = slot(view, numberWidth, rowHeight)
   value.addSpacer()
@@ -312,11 +317,14 @@ function quotaTable(widget, quota, now, width, tableBudget, large) {
   if (hidden) text(identityHeading, `另 ${hidden} 条`, Font.mediumSystemFont(large ? 9.5 : 8), palette.secondary)
   headers.addSpacer(columnGap)
   const periods = ['5 小时', '每周']
+  const valueSpace = quotaValueWidth(valueSize) + quotaValueGap
   for (const title of periods) {
     const heading = slot(headers, column, headerHeight)
-    heading.addSpacer()
-    text(heading, title, Font.mediumSystemFont(large ? 10.5 : 8.5), palette.secondary)
-    heading.addSpacer()
+    const tapeHeading = slot(heading, Math.max(2, column - valueSpace), headerHeight)
+    tapeHeading.addSpacer()
+    text(tapeHeading, title, Font.mediumSystemFont(large ? 10.5 : 8.5), palette.secondary)
+    tapeHeading.addSpacer()
+    heading.addSpacer(valueSpace)
     if (title === periods[0]) headers.addSpacer(columnGap)
   }
   table.addSpacer(headerGap)
@@ -725,19 +733,18 @@ function widgetMasthead(parent, card, title, rate, family) {
   header.addSpacer(2)
   header.addSpacer()
   const name = { today: 'TURNTABLE', trend: 'LP CRATE', quota: 'DUAL CASSETTE DECK' }[card]
-  const size = large ? 8.5 : card === 'quota' && family === 'small' ? 6 : 7
-  text(header, name, Font.mediumMonospacedSystemFont(size), palette.secondary).minimumScaleFactor = 0.7
-
-  const status = slot(parent, 0, statusHeight)
-  status.addSpacer()
   const font = Font.mediumSystemFont(large ? 9.5 : 8)
+  const equipmentFont = Font.mediumMonospacedSystemFont(large ? 8.5 : 7)
   if (card === 'quota') {
-    text(status, '剩余', font, palette.secondary)
-    status.addSpacer(4)
-    bar(status, large ? 34 : 25, large ? 5 : 4, 0.5, false)
+    text(header, '剩余', font, palette.secondary)
   } else if (card === 'today' && rate !== null) {
-    text(status, `缓存命中 ${rate}%`, font, palette.secondary)
+    text(header, `命中 ${rate}%`, font, palette.secondary)
+  } else if (card === 'trend') {
+    text(header, name, equipmentFont, palette.secondary).minimumScaleFactor = 0.7
   }
+  const caption = slot(parent, 0, statusHeight)
+  if (card !== 'trend') text(caption, name, equipmentFont, palette.secondary).minimumScaleFactor = 0.7
+  caption.addSpacer()
   return titleHeight + statusHeight
 }
 
