@@ -14,6 +14,7 @@
   --s-other: #8a8a8f;
   --card-shadow: 0 1px 2px rgba(0,0,0,.05), 0 1px 3px rgba(0,0,0,.06);
   --accent: #e8590c;
+  --accent-ink: #fff;
   --accent-text: #bf4808;
   --bg: #e6e6e8;
   --line: rgba(0,0,0,.08);
@@ -60,12 +61,12 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: #0f0f10;
-    --side: #0f0f10;
-    --page: #1a1a1b;
-    --panel: #0f0f10;
-    --phead: #2f2f31;
-    --card-inner: #2b2b2d;
+    --canvas: var(--desktop-dark-surface-base, #0f0f10);
+    --side: var(--desktop-dark-surface-base, #0f0f10);
+    --page: var(--desktop-dark-surface-page, #1a1a1b);
+    --panel: var(--desktop-dark-surface-base, #0f0f10);
+    --phead: var(--desktop-dark-surface-raised, #2f2f31);
+    --card-inner: var(--desktop-dark-surface-raised, #2b2b2d);
     --card-inner-shadow: none;
     --s-flagship: #3987e5;
     --s-premium: #199e70;
@@ -73,28 +74,29 @@
     --s-fast: #c98500;
     --s-other: #6e6e73;
     --card-shadow: 0 1px 2px rgba(0,0,0,.24), 0 1px 3px rgba(0,0,0,.30);
-    --accent: #f2701c;
-    --accent-text: #f2701c;
-    --bg: #0f0f10;
+    --accent: var(--desktop-dark-accent, #f2701c);
+    --accent-text: var(--desktop-dark-accent, #f2701c);
+    --accent-ink: var(--desktop-dark-surface-base, #fff);
+    --bg: var(--desktop-dark-surface-base, #0f0f10);
     --line: rgba(255,255,255,.07);
     --line2: rgba(255,255,255,.05);
-    --ink: #f4f4f5;
-    --mut: #a1a1a6;
-    --mut2: #9a9a9f;
+    --ink: var(--desktop-dark-ink, #f4f4f5);
+    --mut: var(--desktop-dark-muted, #a1a1a6);
+    --mut2: var(--desktop-dark-muted, #9a9a9f);
     --ok: #3ecf8e;
     --warn: #e8b93e;
     --bad: #f26d6d;
-    --bar: #343436;
-    --bar-hi: #cacacd;
-    --fill: #2f2f31;
-    --hover: #2f2f31;
+    --bar: var(--desktop-dark-surface-raised, #343436);
+    --bar-hi: var(--desktop-dark-muted, #cacacd);
+    --fill: var(--desktop-dark-surface-raised, #2f2f31);
+    --hover: var(--desktop-dark-surface-raised, #2f2f31);
     --btn-face: var(--fill);
     --btn-line: color-mix(in srgb, var(--ink) 22%, transparent);
     --nav-on: rgba(255,255,255,.08);
     --nav-hover: rgba(255,255,255,.04);
-    --nav-ink: #ffffff;
-    --tip-bg: #ebebec;
-    --tip-ink: #1b1b1c;
+    --nav-ink: var(--desktop-dark-ink, #ffffff);
+    --tip-bg: var(--desktop-dark-ink, #ebebec);
+    --tip-ink: var(--desktop-dark-surface-base, #1b1b1c);
   }
   .pl-light { display: none; }
   .pl-dark { display: inline-flex; }
@@ -102,17 +104,18 @@
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --canvas: #0f0f10; --side: #0f0f10; --page: #1a1a1b; --panel: #0f0f10; --phead: #2f2f31;
-  --card-inner: #2b2b2d; --card-inner-shadow: none;
+  --canvas: var(--desktop-dark-surface-base, #0f0f10); --side: var(--desktop-dark-surface-base, #0f0f10); --page: var(--desktop-dark-surface-page, #1a1a1b); --panel: var(--desktop-dark-surface-base, #0f0f10); --phead: var(--desktop-dark-surface-raised, #2f2f31);
+  --card-inner: var(--desktop-dark-surface-raised, #2b2b2d); --card-inner-shadow: none;
   --s-flagship: #3987e5; --s-premium: #199e70; --s-balanced: #d55181; --s-fast: #c98500; --s-other: #6e6e73;
   --card-shadow: 0 1px 2px rgba(0,0,0,.24), 0 1px 3px rgba(0,0,0,.30);
-  --accent: #f2701c; --accent-text: #f2701c; --bg: #0f0f10; --line: rgba(255,255,255,.07); --line2: rgba(255,255,255,.05);
-  --ink: #f4f4f5; --mut: #a1a1a6; --mut2: #9a9a9f; --ok: #3ecf8e;
-  --warn: #e8b93e; --bad: #f26d6d; --bar: #343436; --bar-hi: #cacacd;
-  --fill: #2f2f31; --hover: #2f2f31;
+  --accent: var(--desktop-dark-accent, #f2701c); --accent-text: var(--desktop-dark-accent, #f2701c);
+  --accent-ink: var(--desktop-dark-surface-base, #fff); --bg: var(--desktop-dark-surface-base, #0f0f10); --line: rgba(255,255,255,.07); --line2: rgba(255,255,255,.05);
+  --ink: var(--desktop-dark-ink, #f4f4f5); --mut: var(--desktop-dark-muted, #a1a1a6); --mut2: var(--desktop-dark-muted, #9a9a9f); --ok: #3ecf8e;
+  --warn: #e8b93e; --bad: #f26d6d; --bar: var(--desktop-dark-surface-raised, #343436); --bar-hi: var(--desktop-dark-muted, #cacacd);
+  --fill: var(--desktop-dark-surface-raised, #2f2f31); --hover: var(--desktop-dark-surface-raised, #2f2f31);
   --btn-face: var(--fill); --btn-line: color-mix(in srgb, var(--ink) 22%, transparent);
-  --nav-on: rgba(255,255,255,.08); --nav-hover: rgba(255,255,255,.04); --nav-ink: #ffffff;
-  --tip-bg: #ebebec; --tip-ink: #1b1b1c;
+  --nav-on: rgba(255,255,255,.08); --nav-hover: rgba(255,255,255,.04); --nav-ink: var(--desktop-dark-ink, #ffffff);
+  --tip-bg: var(--desktop-dark-ink, #ebebec); --tip-ink: var(--desktop-dark-surface-base, #1b1b1c);
 }
 :root[data-theme='dark'] .pl-light { display: none; }
 :root[data-theme='dark'] .pl-dark { display: inline-flex; }
@@ -123,7 +126,7 @@
   --card-inner: #ffffff; --card-inner-shadow: 0 1px 2px rgba(0,0,0,.04);
   --s-flagship: #2a78d6; --s-premium: #1baf7a; --s-balanced: #e87ba4; --s-fast: #eda100; --s-other: #8a8a8f;
   --card-shadow: 0 1px 2px rgba(0,0,0,.05), 0 1px 3px rgba(0,0,0,.06);
-  --accent: #e8590c; --accent-text: #bf4808; --bg: #e6e6e8; --line: rgba(0,0,0,.08); --line2: rgba(0,0,0,.05);
+  --accent: #e8590c; --accent-text: #bf4808; --accent-ink: #fff; --bg: #e6e6e8; --line: rgba(0,0,0,.08); --line2: rgba(0,0,0,.05);
   --ink: #121214; --mut: #5f5f63; --mut2: #646467; --ok: #0f7455;
   --warn: #925b00; --bad: #c2382f; --bar: #dcdcde; --bar-hi: #3a3a3c;
   --fill: #f0f0f1; --hover: #f0f0f1;
@@ -387,9 +390,9 @@ body { overflow: hidden; background: var(--bg); color: var(--ink); }
 .calendar-day:hover:not(:disabled) { background: var(--hover); }
 .calendar-day.outside { color: var(--mut2); }
 .calendar-day.in-range { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--ink); border-radius: 2px; }
-.calendar-day.endpoint { background: var(--accent); color: #fff; border-radius: 6px; font-weight: 600; }
+.calendar-day.endpoint { background: var(--accent); color: var(--accent-ink); border-radius: 6px; font-weight: 600; }
 .calendar-day:disabled { color: var(--mut2); opacity: .38; cursor: default; }
-.btn-p { background: var(--accent); box-shadow: none; }
+.btn-p { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
 .btn-s { background: var(--panel); }
 /* The shared card: a hairline outer frame with a header strip over an inner surface,
    the same anatomy the Overview cards use. */
@@ -486,7 +489,7 @@ body { overflow: hidden; background: var(--bg); color: var(--ink); }
 .set-input { border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px; font: inherit; font-size: var(--fs-meta); background: var(--panel); color: var(--ink); min-width: 0; }
 .set-input:focus-visible { border-color: var(--accent); }
 .btnp { font-size: var(--fs-meta); font-weight: var(--fw-medium); color: var(--ink); border: 1px solid var(--btn-line); border-radius: 7px; padding: 5px 11px; background: var(--btn-face); cursor: pointer; }
-.btnp-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btnp-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .btnp:disabled { opacity: .45; cursor: default; }
 .set-text-button { padding: 0; border: 0; background: transparent; color: var(--accent-text); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent-text) 42%, transparent); text-underline-offset: 2px; font: inherit; font-size: var(--fs-meta); cursor: pointer; }
 .set-confirm { display: inline-flex; align-items: center; gap: 10px; }
