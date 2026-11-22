@@ -317,8 +317,8 @@ private enum Card: String {
 
     var description: String {
         switch self {
-        case .today: copy("三款 Agent 的 Token 和缓存命中率。", "Tokens and cache hits for your three agents.")
-        case .trend: copy("最近 7 天的 Token 消耗。", "Token usage over the last seven days.")
+        case .today: copy("三款 Agent 的用量和缓存命中率。", "Tokens and cache hits for your three agents.")
+        case .trend: copy("最近 7 天的用量。", "Tokens used over the last seven days.")
         case .quota: copy("各 Agent 的套餐窗口及剩余比例。", "Remaining percentage for each agent’s plan windows.")
         }
     }
@@ -383,8 +383,6 @@ private enum VinylFinish: String {
         light ? Color(rgb: 0xd14114) : self == .walnut ? Color(rgb: 0xf68646) : Color(rgb: 0xf9671e)
     }
 
-    var tape: Color { light ? Color(rgb: 0x0d9668) : self == .walnut ? Color(rgb: 0x34d399) : Color(rgb: 0x10b981) }
-    var lowTape: Color { light ? Color(rgb: 0xd97706) : self == .walnut ? Color(rgb: 0xfbbf24) : Color(rgb: 0xf59e0b) }
     var eject: Color { light ? Color(rgb: 0xb51d44) : Color(rgb: 0xfb7185) }
     var well: Color { light ? Color(rgb: 0xcec7bc).opacity(0.7) : Color.black.opacity(0.5) }
     var cassetteWell: Color {
@@ -394,22 +392,11 @@ private enum VinylFinish: String {
         light ? Color(rgb: 0x998375).opacity(0.48) : Color(rgb: 0xa38476).opacity(0.29)
     }
 
-    var sleeves: [(UInt32, UInt32)] {
+    var sleeves: [UInt32] {
         switch self {
-        case .silver, .system: [(0xdcd4c8, 0x9e8f7e), (0xd2c9bc, 0x6f7c85), (0xd9cdc0, 0xb87f62),
-                               (0xcfc4b4, 0x566b65), (0xd7ccbe, 0x8f7b6a), (0xcec6ba, 0x6c6862)]
-        case .dark: [(0x342f2c, 0x6f8594), (0x2c2826, 0x9c785c), (0x38312c, 0xb86846),
-                     (0x40362f, 0xc99749), (0x322d2a, 0x5f8a7a), (0x2b2725, 0x7d756e)]
-        case .walnut: [(0x523a2c, 0xb8845c), (0x483327, 0x6c858c), (0x5b4030, 0xc97b55),
-                       (0x644533, 0xd4a359), (0x50392c, 0x7a9483), (0x443025, 0x9e8470)]
-        }
-    }
-
-    var crate: [Color] {
-        switch self {
-        case .silver, .system: [Color(rgb: 0xd3c8b9), Color(rgb: 0xa69682)]
-        case .dark: [Color(rgb: 0x3f352e), Color(rgb: 0x1e1916)]
-        case .walnut: [Color(rgb: 0x734d33), Color(rgb: 0x3b2416)]
+        case .silver, .system: [0xdcd4c8, 0xd2c9bc, 0xd9cdc0, 0xcfc4b4, 0xd7ccbe, 0xcec6ba]
+        case .dark: [0x837168, 0x716159, 0x998579, 0xa7917f, 0x7f6c62, 0x957f70]
+        case .walnut: [0xb88d60, 0xaf805a, 0xc6a586, 0xc89454, 0xae917e, 0xc7a78b]
         }
     }
 }
@@ -547,46 +534,51 @@ private struct WidgetCard: View {
     }
 
     private var header: some View {
-        HStack(spacing: 5) {
-            Text(cardTitle)
-                .font(.system(size: large ? 15 : 11.5, weight: .bold))
-                .foregroundStyle(finish.orange)
-                .lineLimit(1).layoutPriority(1)
-                .accessibilityAddTraits(.isHeader)
-            if card == .quota && wide {
-                Text("DUAL CASSETTE DECK")
-                    .font(.system(size: large ? 8 : 6.5, weight: .medium, design: .monospaced))
-                    .tracking(0.6).foregroundStyle(secondaryColor).lineLimit(1)
+        VStack(alignment: .trailing, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(cardTitle)
+                    .font(.system(size: large ? 15 : 11.5, weight: .bold))
+                    .foregroundStyle(finish.orange)
+                    .lineLimit(1).layoutPriority(1)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                Text(equipmentName)
+                    .font(.system(size: large ? 8.5 : 7, weight: .medium, design: .monospaced))
+                    .tracking(0.5).foregroundStyle(secondaryColor)
+                    .lineLimit(1).minimumScaleFactor(0.68)
                     .accessibilityHidden(true)
             }
-            Spacer(minLength: 1)
-            if card == .quota {
-                HStack(spacing: 4) {
-                    Circle().fill(finish.orange).frame(width: 4, height: 4).accessibilityHidden(true)
-                    Text(copy("剩余", "Remaining"))
-                }
-                .font(.system(size: large ? 10 : 8.5, weight: .medium))
+            headerStatus
+                .font(.system(size: large ? 10 : 8, weight: .medium))
                 .foregroundStyle(secondaryColor)
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(finish.cassetteWell, in: Capsule())
-            } else if card == .trend {
-                Text("LP CRATE").font(.system(size: 7, design: .monospaced))
-                    .tracking(0.6).foregroundStyle(secondaryColor).accessibilityHidden(true)
-            } else if let rate = usage?.cacheRate {
-                HStack(spacing: 3) {
-                    Circle().fill(rate >= 0.9 ? finish.tape : finish.lowTape).frame(width: 4, height: 4)
-                    Text(percent(rate)).monospacedDigit().contentTransition(reduceMotion ? .identity : .numericText(value: rate * 100))
-                    Text(rate >= 0.9 ? "LOCK" : "DRIFT")
-                }
-                .font(.system(size: 7, weight: .semibold, design: .monospaced))
-                .padding(.horizontal, 5).padding(.vertical, 3)
-                .background(finish.well, in: Capsule())
-                .overlay(Capsule().strokeBorder(ruleColor, lineWidth: 0.6))
-                .animation(updateAnimation, value: rate)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(copy("缓存命中率", "Cache hit rate") + " " + percent(rate))
+                .lineLimit(1)
+                .frame(height: large ? 12 : 9)
+        }
+    }
+
+    private var equipmentName: String {
+        switch card {
+        case .today: "TURNTABLE"
+        case .trend: "LP CRATE"
+        case .quota: "DUAL CASSETTE DECK"
+        }
+    }
+
+    @ViewBuilder
+    private var headerStatus: some View {
+        if card == .quota {
+            HStack(spacing: 5) {
+                Text(copy("剩余", "Remaining"))
+                tapeProgress(0.5, tint: finish.orange, height: large ? 5 : 4)
+                    .frame(width: large ? 34 : 25)
             }
+        } else if card == .today, let rate = usage?.cacheRate {
+            Text(copy("缓存命中", "Cache hit") + " " + percent(rate))
+                .monospacedDigit()
+                .contentTransition(reduceMotion ? .identity : .numericText(value: rate * 100))
+                .animation(updateAnimation, value: rate)
+        } else {
+            Color.clear.frame(width: 1).accessibilityHidden(true)
         }
     }
 
@@ -636,13 +628,7 @@ private struct WidgetCard: View {
 
     private func today(_ usage: UsageSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            VStack(alignment: .leading, spacing: 2) {
-                usageTotal(usage.total)
-                Text("Token" + (usage.cacheRate.map { " · " + copy("缓存", "Cache") + " " + percent($0) } ?? ""))
-                    .font(.system(size: 8, weight: .medium, design: .monospaced)).foregroundStyle(secondaryColor)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            usageTotal(usage.total).frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 0)
             GeometryReader { geometry in
                 VStack(alignment: .leading, spacing: 3) {
@@ -660,7 +646,7 @@ private struct WidgetCard: View {
                         .monospacedDigit().lineLimit(1)
                         .frame(width: wide ? min(geometry.size.width, 150) : geometry.size.width * 0.48, alignment: .leading)
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(row.id.name + " " + compact(row.tokens) + " Token"
+                        .accessibilityLabel(row.id.name + " " + compact(row.tokens) + " Tokens"
                             + (row.cacheRate.map { " · " + copy("缓存命中", "Cache hit") + " " + percent($0) } ?? ""))
                     }
                 }
@@ -713,30 +699,34 @@ private struct WidgetCard: View {
                 .font(.system(size: numberSize, weight: detail ? .semibold : .black,
                               design: detail ? .monospaced : .default))
                 .tracking(detail ? 0 : -0.75)
+                .foregroundStyle(detail ? finish.orange : finish.ink)
                 .monospacedDigit().lineLimit(1).minimumScaleFactor(detail ? 0.72 : 0.62)
                 .contentTransition(reduceMotion ? .identity : .numericText())
                 .animation(updateAnimation, value: total)
             if !parts.unit.isEmpty {
                 Text(parts.unit)
                     .font(.system(size: unitSize, weight: .semibold))
+                    .foregroundStyle(detail ? finish.orange : secondaryColor)
+            }
+            if !detail {
+                Text("Tokens")
+                    .font(.system(size: wide ? 8 : 7, weight: .medium))
                     .foregroundStyle(secondaryColor)
+                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
             }
         }
         .accessibilityElement(children: .combine)
     }
 
     private func usageTotal(_ total: Int?) -> some View {
-        tokenValue(total, numberSize: wide ? 30 : 26, unitSize: 9)
+        tokenValue(total, numberSize: wide ? 30 : 26, unitSize: wide ? 11 : 9.5)
     }
 
     private func trend(_ usage: UsageSnapshot) -> some View {
         let maximum = max(1, usage.days.compactMap(\.tokens).max() ?? 0)
         let peakId = usage.days.first { ($0.tokens ?? 0) == maximum }?.id
         return VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
-                usageTotal(sum(usage.days.map(\.tokens)))
-                Text("Token").font(.system(size: 9, weight: .medium)).foregroundStyle(secondaryColor)
-            }
+            usageTotal(sum(usage.days.map(\.tokens)))
             GeometryReader { geometry in
                 let gap: CGFloat = wide ? 7 : 3.5
                 let deck: CGFloat = 10.5
@@ -763,8 +753,7 @@ private struct WidgetCard: View {
                         }
                     }
                     .frame(width: axisWidth, height: deck)
-                    .background(LinearGradient(colors: finish.crate, startPoint: .top, endPoint: .bottom),
-                                in: RoundedRectangle(cornerRadius: 3))
+                    .overlay(alignment: .top) { Rectangle().fill(ruleColor).frame(height: 0.5) }
                     .accessibilityHidden(true)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -800,19 +789,7 @@ private struct WidgetCard: View {
             if let value = day.tokens {
                 let coverHeight = value == 0 ? 1 : max(2, maxCover * ratio)
                 UnevenRoundedRectangle(topLeadingRadius: 2.5, topTrailingRadius: 2.5)
-                    .fill(today ? finish.orange : Color(rgb: palette.0))
-                    .overlay(alignment: .top) {
-                        if coverHeight >= 13 {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(String(format: "%02d", index + 1)).font(.system(size: 5.5, weight: .bold, design: .monospaced))
-                                if coverHeight >= 24 {
-                                    Image(systemName: ["rectangle.fill", "circle.fill", "diamond.fill"][index % 3])
-                                        .font(.system(size: 4.5)).foregroundStyle(today ? Color(rgb: 0xffd883) : Color(rgb: palette.1))
-                                }
-                            }
-                            .foregroundStyle(today ? Color(rgb: 0xffeed2) : finish.ink.opacity(0.76)).padding(.top, 2)
-                        }
-                    }
+                    .fill(today ? finish.orange : Color(rgb: palette))
                     .overlay { UnevenRoundedRectangle(topLeadingRadius: 2.5, topTrailingRadius: 2.5).strokeBorder(ruleColor, lineWidth: 0.55) }
                     .frame(height: coverHeight)
             } else {
@@ -822,7 +799,7 @@ private struct WidgetCard: View {
         .frame(maxWidth: .infinity)
         .animation(updateAnimation, value: ratio)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(day.day + ", " + compact(day.tokens) + " Token")
+        .accessibilityLabel(day.day + ", " + compact(day.tokens) + " Tokens")
     }
 
     @ViewBuilder
@@ -886,8 +863,8 @@ private struct WidgetCard: View {
             Grid(alignment: .leading, horizontalSpacing: gap, verticalSpacing: metrics.spacing) {
                 GridRow {
                     Color.clear.frame(width: quotaIdentityWidth, height: 1).accessibilityHidden(true)
-                    periodLabel(.fiveHours).frame(width: column, alignment: .trailing)
-                    periodLabel(.weekly).frame(width: column, alignment: .trailing)
+                    periodLabel(.fiveHours).frame(width: column)
+                    periodLabel(.weekly).frame(width: column)
                 }
                 .frame(height: metrics.headingHeight)
                 ForEach(accounts, id: \.id) { account in

@@ -6,6 +6,36 @@ import { test } from 'node:test'
 const script = await readFile(new URL('./quota-widget.js', import.meta.url), 'utf8')
 const functions = script.slice(script.indexOf('function knownCount('), script.indexOf('function sum('))
 
+test('both usage totals share one baseline and use smaller plural Tokens', () => {
+  const functions = script.slice(script.indexOf('function tokenParts('), script.indexOf('function hitRate('))
+  const palette = { primary: 'number', secondary: 'caption', accent: 'accent' }
+  const font = size => ({ size })
+  const { tokenTotal } = runInNewContext(functions + '; ({ tokenTotal })', {
+    palette,
+    Font: { boldSystemFont: font, semiboldSystemFont: font, mediumSystemFont: font },
+    horizontal(parent) {
+      const row = { children: [], bottomAlignContent() { this.aligned = 'bottom' },
+        addSpacer() {}, setPadding(...padding) { this.padding = padding } }
+      parent.children.push(row)
+      return row
+    },
+    text(parent, value, font) { parent.children.push({ value, font }) },
+  })
+  for (const [count, amount, unit] of [[272_000_000, '272', 'M'], [2_560_000_000, '2.56', 'B']]) {
+    const root = { children: [] }
+    tokenTotal(root, count, 'small')
+    assert.equal(root.children.length, 1)
+    const [line] = root.children
+    assert.equal(line.aligned, 'bottom')
+    const [number, suffix, caption] = line.children
+    assert.equal(number.value, amount)
+    assert.equal(suffix.children[0].value, unit)
+    assert.equal(caption.children[0].value, 'Tokens')
+    assert(caption.children[0].font.size < suffix.children[0].font.size)
+    assert(caption.padding[2] > suffix.padding[2])
+  }
+})
+
 test('system dark uses walnut in both the widget and its in-app preview', () => {
   const styles = script.slice(script.indexOf('const requestedFinish'), script.indexOf('const agentIds'))
   function colors(parameter, runsInWidget, systemDark) {

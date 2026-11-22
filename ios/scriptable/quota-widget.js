@@ -37,9 +37,8 @@ const palette = automatic ? Object.fromEntries(Object.keys(paint).map(role => [
 const agentIds = ['codex', 'zcode', 'antigravity']
 const agentColors = ['#06b6d4', '#4387fb', '#d946ef']
 const coverColors = light ? ['#dcd4c8','#d2c9bc','#d9cdc0','#cfc4b4','#d7ccbe','#cec6ba']
-  : walnut ? ['#523a2c','#483327','#5b4030','#644533','#50392c','#443025']
-  : ['#342f2c','#2c2826','#38312c','#40362f','#322d2a','#2b2725']
-const sleeveInk = ['#6f8594','#9c785c','#b86846','#c99749','#5f8a7a','#7d756e'].map(x => new Color(x))
+  : walnut ? ['#b88d60','#af805a','#c6a586','#c89454','#ae917e','#c7a78b']
+  : ['#837168','#716159','#998579','#a7917f','#7f6c62','#957f70']
 const inset = 11
 const railWidth = 42
 const columnGap = 8
@@ -76,6 +75,7 @@ function text(stack, value, font, color = palette.primary) {
   label.textColor = color
   label.lineLimit = 1
   label.minimumScaleFactor = 0.8
+  return label
 }
 
 function horizontal(parent) {
@@ -316,6 +316,7 @@ function quotaTable(widget, quota, now, width, tableBudget, large) {
     const heading = slot(headers, column, headerHeight)
     heading.addSpacer()
     text(heading, title, Font.mediumSystemFont(large ? 10.5 : 8.5), palette.secondary)
+    heading.addSpacer()
     if (title === periods[0]) headers.addSpacer(columnGap)
   }
   table.addSpacer(headerGap)
@@ -482,24 +483,32 @@ function tokenParts(number) {
   return [String(rounded), units[index]]
 }
 
-function tokenAmount(parent, count, numberSize, unitSize, withLabel = false) {
+function tokenAmount(parent, count, numberSize, unitSize, labelSize = 0) {
   const [value, unit] = tokenParts(count)
   const line = horizontal(parent)
   line.bottomAlignContent()
-  text(line, value, Font.boldSystemFont(numberSize))
+  const amountColor = labelSize ? palette.primary : palette.accent
+  const unitColor = labelSize ? palette.secondary : palette.accent
+  text(line, value, Font.boldSystemFont(numberSize), amountColor)
 
   // Scriptable aligns the text frames, so compensate for their different descents.
-  const baselineInset = Math.round((numberSize - unitSize) * 0.20)
-  if (unit || withLabel) {
+  if (unit) {
     line.addSpacer(2)
     const suffix = horizontal(line)
-    suffix.setPadding(0, 0, baselineInset, 0)
-    if (unit) text(suffix, unit, Font.semiboldSystemFont(unitSize), palette.secondary)
-    if (withLabel) {
-      if (unit) suffix.addSpacer(4)
-      text(suffix, 'Token', Font.mediumSystemFont(unitSize), palette.secondary)
-    }
+    suffix.setPadding(0, 0, Math.round((numberSize - unitSize) * 0.20), 0)
+    text(suffix, unit, Font.semiboldSystemFont(unitSize), unitColor)
   }
+  if (labelSize) {
+    line.addSpacer(3)
+    const caption = horizontal(line)
+    caption.setPadding(0, 0, Math.round((numberSize - labelSize) * 0.20), 0)
+    text(caption, 'Tokens', Font.mediumSystemFont(labelSize), palette.secondary)
+  }
+}
+
+function tokenTotal(parent, count, family) {
+  const small = family === 'small'
+  tokenAmount(parent, count, small ? 25 : 33, small ? 9.5 : 11, small ? 7 : 8)
 }
 
 function hitRate(usage) {
@@ -630,9 +639,7 @@ function smallQuota(widget, quota, now, width) {
 
 function todayPanel(widget, usage, family, width) {
   const small = family === 'small'
-  tokenAmount(widget, sum(usage.agents.map(agent => agent.tokens)), small ? 25 : 33, 9)
-  const rate = hitRate(usage)
-  text(widget, rate === null ? 'Token' : `Token · 缓存 ${rate}%`, Font.mediumSystemFont(8), palette.secondary)
+  tokenTotal(widget, sum(usage.agents.map(agent => agent.tokens)), family)
   widget.addSpacer()
   const ranked = usage.agents.filter(agent => agent.tokens !== 0)
     .sort((a, b) => (b.tokens ?? -1) - (a.tokens ?? -1))
@@ -653,11 +660,6 @@ function sleeveImage(usage, width, height, axisHeight) {
   canvas.respectScreenScale = true
   const gap = 3
   const column = (width - 6 * gap) / 7
-  const base = new Path()
-  base.addRoundedRect(new Rect(0, height, width, axisHeight), 2.5, 2.5)
-  canvas.setFillColor(paint.well)
-  canvas.addPath(base)
-  canvas.fillPath()
   const days = ['日', '一', '二', '三', '四', '五', '六']
   const max = Math.max(1, ...usage.days.map(row => row.tokens ?? 0))
   const peak = usage.days.findIndex(row => row.tokens === max)
@@ -679,23 +681,13 @@ function sleeveImage(usage, width, height, axisHeight) {
     }
     canvas.setFillColor(today ? paint.accent : new Color(coverColors[index % coverColors.length]))
     canvas.fillRect(new Rect(x, y, column, coverHeight))
-    if (coverHeight >= 14) {
-      canvas.setTextColor(today ? new Color('#ffeed2') : paint.primary)
-      canvas.setFont(Font.semiboldMonospacedSystemFont(5.5))
-      canvas.drawText(String(index + 1).padStart(2, '0'), new Point(x + 2, y + 2))
-    }
-    if (coverHeight >= 19) {
-      canvas.setFillColor(today ? new Color('#ffda86') : sleeveInk[index % sleeveInk.length])
-      const mark = Math.min(5, column * 0.28)
-      canvas.fillEllipse(new Rect(x + (column - mark) / 2, height - 9, mark, mark))
-    }
     if (index === peak && !today && y >= 8) {
       canvas.setFillColor(new Color('#f8cc6a'))
       canvas.fillRect(new Rect(x, Math.max(0, y - 8), column, 6))
       canvas.setTextColor(new Color('#251911'))
       canvas.setFont(Font.semiboldMonospacedSystemFont(Math.min(4.8, column / 2.8)))
       canvas.setTextAlignedCenter()
-      canvas.drawTextInRect('PEAK', new Rect(x, Math.max(0, y - 8), column, 6))
+      canvas.drawTextInRect('峰值', new Rect(x, Math.max(0, y - 8), column, 6))
       canvas.setTextAlignedLeft()
     }
     const weekday = days[new Date(row.day + 'T12:00:00').getDay()] ?? '—'
@@ -705,21 +697,48 @@ function sleeveImage(usage, width, height, axisHeight) {
     canvas.drawTextInRect(weekday, new Rect(x, height + 0.25, column, axisHeight - 0.25))
     canvas.setTextAlignedLeft()
   }
+  canvas.setFillColor(paint.rule)
+  canvas.fillRect(new Rect(0, height, width, 0.5))
   return canvas.getImage()
 }
 
-function trendPanel(widget, usage, family, width, widgetHeight) {
+function trendPanel(widget, usage, family, width, widgetHeight, mastheadHeight) {
   const small = family === 'small'
-  tokenAmount(widget, sum(usage.days.map(day => day.tokens)), small ? 22 : 29, 9, true)
+  tokenTotal(widget, sum(usage.days.map(day => day.tokens)), family)
   widget.addSpacer()
-  const totalHeight = small ? 27 : 35
+  const totalHeight = small ? 30 : 39
   const axisHeight = 9.5
-  const height = Math.max(28, Math.min(62, widgetHeight - 2 * inset - 18 - 4 - totalHeight - axisHeight - 13 - 6))
+  const height = Math.max(27, Math.min(62, widgetHeight - 2 * inset - mastheadHeight - 4 - totalHeight - axisHeight - 13 - 6))
   const chartWidth = Math.floor(width * (small ? 0.86 : 0.88))
   const line = slot(widget, width, height + axisHeight)
   line.addSpacer(Math.floor((width - chartWidth) / 2))
   const display = line.addImage(sleeveImage(usage, chartWidth, height, axisHeight))
   display.imageSize = new Size(chartWidth, height + axisHeight)
+}
+
+function widgetMasthead(parent, card, title, rate, family) {
+  const large = family === 'large'
+  const titleHeight = large ? 17 : 13
+  const statusHeight = large ? 12 : 9
+  const header = slot(parent, 0, titleHeight)
+  text(header, title, Font.boldSystemFont(large ? 14 : 11), palette.accent)
+  header.addSpacer(2)
+  header.addSpacer()
+  const name = { today: 'TURNTABLE', trend: 'LP CRATE', quota: 'DUAL CASSETTE DECK' }[card]
+  const size = large ? 8.5 : card === 'quota' && family === 'small' ? 6 : 7
+  text(header, name, Font.mediumMonospacedSystemFont(size), palette.secondary).minimumScaleFactor = 0.7
+
+  const status = slot(parent, 0, statusHeight)
+  status.addSpacer()
+  const font = Font.mediumSystemFont(large ? 9.5 : 8)
+  if (card === 'quota') {
+    text(status, '剩余', font, palette.secondary)
+    status.addSpacer(4)
+    bar(status, large ? 34 : 25, large ? 5 : 4, 0.5, false)
+  } else if (card === 'today' && rate !== null) {
+    text(status, `缓存命中 ${rate}%`, font, palette.secondary)
+  }
+  return titleHeight + statusHeight
 }
 
 function vinylWidget(card, data, updatedAt, status, now, family, art) {
@@ -753,30 +772,10 @@ function vinylWidget(card, data, updatedAt, status, now, family, art) {
     widget.backgroundImage = chassis(width, height, card === 'today' ? art : null, data)
   }
 
-  const header = slot(content, 0, 18)
   const pastUsage = card !== 'quota' && data && data.day !== calendarKey(now)
   const title = pastUsage ? (card === 'today' ? '用量 ' : '趋势截至 ') + data.day.slice(5)
     : {today:'今日用量', trend:'7 天趋势', quota:'套餐额度'}[card]
-  text(header, title,
-    Font.boldSystemFont(family === 'large' ? 14 : 11), palette.accent)
-  header.addSpacer()
-  if (card === 'quota') {
-    const dot = slot(header, 4, 4)
-    dot.cornerRadius = 2
-    dot.backgroundColor = palette.accent
-    header.addSpacer(4)
-    text(header, '剩余', Font.mediumSystemFont(8.5), palette.secondary)
-  } else if (card === 'today' && data && hitRate(data) !== null) {
-    const rate = hitRate(data)
-    const indicator = slot(header, 48, 13)
-    indicator.cornerRadius = 6.5
-    indicator.backgroundColor = palette.well
-    indicator.addSpacer()
-    text(indicator, `${rate}% ${rate >= 90 ? 'LOCK' : 'DRIFT'}`, Font.semiboldMonospacedSystemFont(7), palette.primary)
-    indicator.addSpacer()
-  } else if (card === 'trend') {
-    text(header, 'LP CRATE', Font.mediumMonospacedSystemFont(7), palette.secondary)
-  }
+  const mastheadHeight = widgetMasthead(content, card, title, card === 'today' && data ? hitRate(data) : null, family)
 
   content.addSpacer(4)
   if (!data) {
@@ -786,12 +785,12 @@ function vinylWidget(card, data, updatedAt, status, now, family, art) {
   } else if (card === 'today') {
     todayPanel(content, data, family, contentWidth)
   } else if (card === 'trend') {
-    trendPanel(content, data, family, contentWidth, height)
+    trendPanel(content, data, family, contentWidth, height, mastheadHeight)
   } else if (family === 'small') {
     smallQuota(content, data, now, contentWidth)
   } else {
     const large = family === 'large'
-    const tableBudget = height - (2 * inset + 18 + 4 + 13 + 5)
+    const tableBudget = height - (2 * inset + mastheadHeight + 4 + 13 + 5)
     quotaTable(content, data, now, contentWidth, tableBudget, large)
   }
 
