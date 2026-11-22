@@ -6,13 +6,13 @@ import { test } from 'node:test'
 const script = await readFile(new URL('./quota-widget.js', import.meta.url), 'utf8')
 const functions = script.slice(script.indexOf('function knownCount('), script.indexOf('function sum('))
 
-test('the usage and quota mastheads keep the right status compact', () => {
+test('all equipment names sit below the title and status dots precede the short labels', () => {
   const source = script.slice(script.indexOf('function widgetMasthead('), script.indexOf('function vinylWidget('))
   const { widgetMasthead } = runInNewContext(source + '; ({ widgetMasthead })', {
-    palette: {},
+    palette: { accent: 'orange' },
     Font: new Proxy({}, { get: () => size => ({ size }) }),
-    slot(parent) {
-      const row = { children: [], addSpacer() {} }
+    slot(parent, width, height) {
+      const row = { children: [], width, height, addSpacer() {} }
       parent.children.push(row)
       return row
     },
@@ -20,10 +20,19 @@ test('the usage and quota mastheads keep the right status compact', () => {
   })
   const today = { children: [] }
   widgetMasthead(today, 'today', '今日用量', 99, 'small')
-  assert.deepEqual(today.children.map(row => row.children), [['今日用量', '命中 99%'], ['TURNTABLE']])
+  assert.deepEqual(today.children.map(row => row.children.filter(x => typeof x === 'string')),
+    [['今日用量', 'Cache 99%'], ['TURNTABLE']])
+  assert.equal(today.children[0].children[1].backgroundColor, 'orange')
+  assert.equal(today.children[0].children[1].width, 4)
+  assert.equal(today.children[0].children[1].cornerRadius, 2)
   const quota = { children: [] }
   widgetMasthead(quota, 'quota', '套餐额度', null, 'medium')
-  assert.deepEqual(quota.children.map(row => row.children), [['套餐额度', '剩余'], ['DUAL CASSETTE DECK']])
+  assert.deepEqual(quota.children.map(row => row.children.filter(x => typeof x === 'string')),
+    [['套餐额度', '剩余'], ['DUAL CASSETTE DECK']])
+  assert.equal(quota.children[0].children[1].backgroundColor, 'orange')
+  const trend = { children: [] }
+  widgetMasthead(trend, 'trend', '7 天趋势', null, 'small')
+  assert.deepEqual(trend.children.map(row => row.children), [['7 天趋势'], ['LP CRATE']])
 })
 
 test('both usage totals share one baseline and use smaller plural Tokens', () => {

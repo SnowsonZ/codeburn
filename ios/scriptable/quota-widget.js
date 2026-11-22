@@ -322,7 +322,7 @@ function quotaTable(widget, quota, now, width, tableBudget, large) {
     const heading = slot(headers, column, headerHeight)
     const tapeHeading = slot(heading, Math.max(2, column - valueSpace), headerHeight)
     tapeHeading.addSpacer()
-    text(tapeHeading, title, Font.mediumSystemFont(large ? 10.5 : 8.5), palette.secondary)
+    text(tapeHeading, title, Font.mediumSystemFont(large ? 11 : 9), palette.secondary)
     tapeHeading.addSpacer()
     heading.addSpacer(valueSpace)
     if (title === periods[0]) headers.addSpacer(columnGap)
@@ -726,24 +726,24 @@ function trendPanel(widget, usage, family, width, widgetHeight, mastheadHeight) 
 
 function widgetMasthead(parent, card, title, rate, family) {
   const large = family === 'large'
-  const titleHeight = large ? 17 : 13
+  const titleHeight = large ? 18 : 13
   const statusHeight = large ? 12 : 9
   const header = slot(parent, 0, titleHeight)
-  text(header, title, Font.boldSystemFont(large ? 14 : 11), palette.accent)
+  text(header, title, Font.boldSystemFont(large ? 15 : 11.5), palette.accent)
   header.addSpacer(2)
   header.addSpacer()
   const name = { today: 'TURNTABLE', trend: 'LP CRATE', quota: 'DUAL CASSETTE DECK' }[card]
-  const font = Font.mediumSystemFont(large ? 9.5 : 8)
-  const equipmentFont = Font.mediumMonospacedSystemFont(large ? 8.5 : 7)
-  if (card === 'quota') {
-    text(header, '剩余', font, palette.secondary)
-  } else if (card === 'today' && rate !== null) {
-    text(header, `命中 ${rate}%`, font, palette.secondary)
-  } else if (card === 'trend') {
-    text(header, name, equipmentFont, palette.secondary).minimumScaleFactor = 0.7
+  const status = card === 'quota' ? '剩余' : card === 'today' && rate !== null ? `Cache ${rate}%` : null
+  if (status) {
+    const dot = slot(header, 4, 4)
+    dot.cornerRadius = 2
+    dot.backgroundColor = palette.accent
+    header.addSpacer(4)
+    text(header, status, Font.mediumSystemFont(large ? 10 : 8.5), palette.secondary)
   }
   const caption = slot(parent, 0, statusHeight)
-  if (card !== 'trend') text(caption, name, equipmentFont, palette.secondary).minimumScaleFactor = 0.7
+  const equipmentFont = Font.mediumMonospacedSystemFont(large ? 9 : 7.5)
+  text(caption, name, equipmentFont, palette.secondary).minimumScaleFactor = 0.7
   caption.addSpacer()
   return titleHeight + statusHeight
 }

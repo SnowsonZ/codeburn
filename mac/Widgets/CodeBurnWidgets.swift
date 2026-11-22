@@ -538,22 +538,29 @@ private struct WidgetCard: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(cardTitle)
-                    .font(.system(size: large ? 15 : 11.5, weight: .bold))
+                    .font(.system(size: large ? 16 : 12, weight: .bold))
                     .foregroundStyle(finish.orange)
                     .lineLimit(1).layoutPriority(1)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
-                if card == .trend {
-                    equipmentLabel
-                } else {
-                    headerStatus
-                        .font(.system(size: large ? 10 : 8, weight: .medium))
-                        .foregroundStyle(secondaryColor)
-                        .lineLimit(1)
+                if let status = headerStatus {
+                    HStack(spacing: 4) {
+                        Circle().fill(finish.orange).frame(width: 4, height: 4).accessibilityHidden(true)
+                        Text(status)
+                            .monospacedDigit()
+                            .contentTransition(reduceMotion ? .identity : .numericText())
+                            .animation(updateAnimation, value: status)
+                            .accessibilityLabel(card == .today
+                                ? status.replacingOccurrences(of: "Cache", with: copy("缓存命中率", "Cache hit rate"))
+                                : status)
+                    }
+                    .font(.system(size: large ? 10.5 : 8.5, weight: .medium))
+                    .foregroundStyle(secondaryColor)
+                    .lineLimit(1)
                 }
             }
             HStack {
-                if card != .trend { equipmentLabel }
+                equipmentLabel
                 Spacer(minLength: 0)
             }
             .frame(height: large ? 12 : 9)
@@ -567,22 +574,17 @@ private struct WidgetCard: View {
         case .quota: "DUAL CASSETTE DECK"
         }
         return Text(name)
-            .font(.system(size: large ? 8.5 : 7, weight: .medium, design: .monospaced))
+            .font(.system(size: large ? 9 : 7.5, weight: .medium, design: .monospaced))
             .tracking(0.5).foregroundStyle(secondaryColor)
             .lineLimit(1).minimumScaleFactor(0.68)
             .accessibilityHidden(true)
     }
 
-    @ViewBuilder
-    private var headerStatus: some View {
-        if card == .quota {
-            Text(copy("剩余", "Remaining"))
-        } else if card == .today, let rate = usage?.cacheRate {
-            Text(copy("命中", "Hit") + " " + percent(rate))
-                .monospacedDigit()
-                .contentTransition(reduceMotion ? .identity : .numericText(value: rate * 100))
-                .animation(updateAnimation, value: rate)
-                .accessibilityLabel(copy("缓存命中率", "Cache hit rate") + " " + percent(rate))
+    private var headerStatus: String? {
+        switch card {
+        case .quota: copy("剩余", "Remaining")
+        case .today: usage?.cacheRate.map { "Cache " + percent($0) }
+        case .trend: nil
         }
     }
 
@@ -984,7 +986,7 @@ private struct WidgetCard: View {
 
     private func periodLabel(_ period: QuotaPeriod) -> some View {
         Text(period.title)
-            .font(.system(size: large ? 11 : 9, weight: .medium)).foregroundStyle(secondaryColor)
+            .font(.system(size: large ? 11.5 : 9.5, weight: .medium)).foregroundStyle(secondaryColor)
             .lineLimit(1)
     }
 
