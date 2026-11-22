@@ -225,19 +225,26 @@ function bar(parent, width, height, remaining, detailed) {
   image.imageSize = new Size(width, height)
 }
 
+function quotaExpired(window, now) {
+  return !!window.resetsAt && Date.parse(window.resetsAt) <= now
+}
+
+function compactQuotaWindow(agent, updatedAt) {
+  const atCommit = agent.windows.filter(window => !quotaExpired(window, Date.parse(updatedAt)))
+  const windows = agent.id === 'antigravity' ? [...atCommit].sort((a, b) => b.percent - a.percent) : atCommit
+  return windows[0] ?? agent.windows[0]
+}
+
 function quotaCell(parent, width, rowHeight, valueSize, window, now, label) {
   const view = slot(parent, width, rowHeight)
   if (!window) return
-  if (window.resetsAt && Date.parse(window.resetsAt) <= now) {
-    view.addSpacer()
-    text(view, '待更新', Font.mediumSystemFont(Math.min(12, valueSize)), palette.secondary)
-    return
-  }
+  const expired = quotaExpired(window, now)
   const amount = `${Math.round((1 - window.percent) * 100)}%`
   // Reserve four monospaced characters plus a small inset for 100%.
   const numberWidth = Math.ceil(valueSize * 3.1 + 3)
+  const oldWidth = expired ? 30 : 0
   const numberGap = 5
-  let barWidth = width - numberWidth - numberGap
+  let barWidth = width - numberWidth - numberGap - oldWidth
   if (label) {
     const labelWidth = Math.min(78, Math.floor(width * 0.32))
     const labelSlot = slot(view, labelWidth, rowHeight)
@@ -247,11 +254,12 @@ function quotaCell(parent, width, rowHeight, valueSize, window, now, label) {
     view.addSpacer(numberGap)
   }
   const barHeight = Math.min(rowHeight - 2, Math.round(valueSize * 1.17))
-  bar(view, barWidth, barHeight, Math.max(0, 1 - window.percent), true)
+  bar(view, Math.max(2, barWidth), barHeight, Math.max(0, 1 - window.percent), true)
   view.addSpacer(numberGap)
+  if (expired) text(slot(view, oldWidth, rowHeight), '已过期', Font.mediumSystemFont(8), palette.secondary)
   const value = slot(view, numberWidth, rowHeight)
   value.addSpacer()
-  text(value, amount, Font.semiboldMonospacedSystemFont(valueSize))
+  text(value, amount, Font.semiboldMonospacedSystemFont(valueSize), expired ? palette.secondary : palette.primary)
 }
 
 function rule(parent, width) {
@@ -332,17 +340,37 @@ function quotaTable(widget, quota, now, width, tableBudget, large) {
   }
 }
 
-function isQuota(value) {
-  return value?.version === 1 && Number.isFinite(Date.parse(value.updatedAt)) &&
-    Array.isArray(value.agents) && value.agents.every(agent => typeof agent?.id === 'string' &&
-      Array.isArray(agent.windows) && agent.windows.every(window =>
-        typeof window?.label === 'string' && Number.isFinite(window.percent) &&
-        window.percent >= 0 && window.percent <= 1))
+function knownCount(value) {
+  return Number.isSafeInteger(value) && value >= 0
 }
 
-function isUsage(value) {
-  return value?.version === 1 && Number.isFinite(Date.parse(value.updatedAt)) &&
-    /^\d{4}-\d{2}-\d{2}$/.test(value.day) && Array.isArray(value.agents) && Array.isArray(value.days)
+function validDay(value) {
+  const at = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(value) : NaN
+  return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === value
+}
+
+function agentRows(rows) {
+  return Array.isArray(rows) && rows.length === agentIds.length &&
+    agentIds.every(id => rows.filter(row => row?.id === id).length === 1)
+}
+
+function isCompleteSnapshot(value) {
+  if (value?.version !== 1 || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))) return false
+  const { usage, quota } = value
+  return usage?.updatedAt === value.updatedAt && quota?.updatedAt === value.updatedAt &&
+    validDay(usage.day) && agentRows(usage.agents) &&
+    usage.agents.every(row => knownCount(row.tokens) && knownCount(row.input) && knownCount(row.cached) &&
+      row.cached <= row.input && row.input <= row.tokens) &&
+    Array.isArray(usage.days) && usage.days.length === 7 && usage.days.at(-1)?.day === usage.day &&
+    new Set(usage.days.map(row => row?.day)).size === 7 &&
+    usage.days.every(row => validDay(row?.day) && knownCount(row.tokens)) &&
+    agentRows(quota.agents) && quota.agents.every(row => row.stale !== true &&
+      Array.isArray(row.windows) && row.windows.length > 0 &&
+      row.windows.length <= (row.id === 'antigravity' ? 24 : 2) &&
+      new Set(row.windows.map(window => window?.label)).size === row.windows.length &&
+      row.windows.every(window => typeof window?.label === 'string' && window.label.length <= 120 &&
+        Number.isFinite(window.percent) && window.percent >= 0 && window.percent <= 1 &&
+        (window.resetsAt === null || (typeof window.resetsAt === 'string' && Number.isFinite(Date.parse(window.resetsAt))))))
 }
 
 function endpoint(route) {
@@ -357,26 +385,74 @@ function privateRequest(url) {
   return request
 }
 
+// Each accepted timestamp has its own file. An older completion from another
+// Scriptable run cannot overwrite a newer one. A torn save is ignored and
+// the last few valid generations are retained. Never mix independent blocks.
+function snapshotCache(disk, url) {
+  const base = disk.libraryDirectory()
+  const prefix = 'codeburn-complete-' + encodeURIComponent(url.toLowerCase()) + '-'
+  const nameFor = stamp => prefix + stamp + '.json'
+  const fileFor = name => disk.joinPath(base, name)
+  const scan = () => {
+    const matches = []
+    try {
+      for (const name of disk.listContents(base)) {
+        if (!name.startsWith(prefix) || !/^\d+\.json$/.test(name.slice(prefix.length))) continue
+        const stamp = Number(name.slice(prefix.length, -5))
+        try {
+          const value = JSON.parse(disk.readString(fileFor(name)))
+          if (isCompleteSnapshot(value) && Date.parse(value.updatedAt) === stamp) matches.push({ name, stamp, value })
+        } catch {}
+      }
+    } catch {}
+    return matches.sort((a, b) => b.stamp - a.stamp)
+  }
+  return {
+    read: () => scan()[0]?.value ?? null,
+    accept(value) {
+      const stamp = Date.parse(value.updatedAt)
+      const existing = scan()[0]
+      if (existing && existing.stamp >= stamp) return { value: existing.value, cached: existing.stamp > stamp }
+      const name = nameFor(stamp)
+      try {
+        const path = fileFor(name)
+        // If another process finished this commit meanwhile, its copy wins.
+        // Same-stamp data conflicts are not authoritative updates.
+        let same = null
+        try { same = JSON.parse(disk.readString(path)) } catch {}
+        if (!isCompleteSnapshot(same) || Date.parse(same.updatedAt) !== stamp) disk.writeString(path, JSON.stringify(value))
+      } catch {}
+      const all = scan()
+      for (const entry of all.slice(3)) {
+        try { disk.remove(fileFor(entry.name)) } catch {}
+      }
+      const best = all[0]
+      return best && best.stamp >= stamp ? { value: best.value, cached: best.stamp > stamp }
+        : { value, cached: false }
+    },
+  }
+}
+
 async function loadData(card) {
   if (!settings) return { data: null, status: '请先导入已配置的脚本' }
-  const disk = FileManager.local()
-  const usage = card !== 'quota'
-  const validate = usage ? isUsage : isQuota
-  const url = endpoint(usage ? '/codeburn-usage' : '/codeburn-quota')
-  const source = url.replace(/[^a-z0-9]/gi, '-')
-  const cache = disk.joinPath(disk.libraryDirectory(), `codeburn-${source}.json`)
+  const url = endpoint('/codeburn-snapshot')
+  const cache = snapshotCache(FileManager.local(), url)
+  const part = card === 'quota' ? 'quota' : 'usage'
   try {
     const request = privateRequest(url)
     const value = await request.loadJSON()
     if (request.response.statusCode === 401) return { data: null, status: '请重新导入配对脚本' }
-    if (request.response.statusCode !== 200 || !validate(value)) throw new Error('Widget data unavailable')
-    try { disk.writeString(cache, JSON.stringify(value)) } catch {}
-    return { data: value, status: null }
+    if (request.response.statusCode === 503) {
+      const previous = cache.read()
+      return previous ? { data: previous[part], updatedAt: previous.updatedAt, status: '显示缓存' }
+        : { data: null, status: '等待首次完整同步' }
+    }
+    if (request.response.statusCode !== 200 || !isCompleteSnapshot(value)) throw new Error('Widget data unavailable')
+    const latest = cache.accept(value)
+    return { data: latest.value[part], updatedAt: latest.value.updatedAt, status: latest.cached ? '显示缓存' : null }
   } catch {
-    try {
-      const previous = JSON.parse(disk.readString(cache))
-      if (validate(previous)) return { data: previous, status: '显示缓存' }
-    } catch {}
+    const previous = cache.read()
+    if (previous) return { data: previous[part], updatedAt: previous.updatedAt, status: '显示缓存' }
     return { data: null, status: '等待同步，请检查 Mac 或 Tailscale' }
   }
 }
@@ -530,22 +606,24 @@ function smallQuota(widget, quota, now, width) {
   for (const agent of quota.agents) {
     widget.addSpacer()
     const row = horizontal(widget)
-    const active = agent.windows.filter(window => !window.resetsAt || Date.parse(window.resetsAt) > now)
-    const windows = agent.id === 'antigravity' ? [...active].sort((a, b) => b.percent - a.percent) : active
-    const window = windows[0] ?? agent.windows[0]
+    const window = compactQuotaWindow(agent, quota.updatedAt)
     identity(row, agent, 14)
     row.addSpacer()
     if (!window) {
       text(row, '额度暂不可用', Font.mediumSystemFont(9), palette.secondary)
       continue
     }
-    const pending = window.resetsAt && Date.parse(window.resetsAt) <= now
+    const expired = quotaExpired(window, now)
     const bucket = window.label.toLowerCase()
-    if (!pending && bucket.includes('week')) text(row, '每周', Font.mediumSystemFont(8), palette.secondary)
-    else if (!pending && /(?:five|5)[ -]hour/.test(bucket)) text(row, '5 小时', Font.mediumSystemFont(8), palette.secondary)
+    if (bucket.includes('week')) text(row, '每周', Font.mediumSystemFont(8), palette.secondary)
+    else if (/(?:five|5)[ -]hour/.test(bucket)) text(row, '5 小时', Font.mediumSystemFont(8), palette.secondary)
     row.addSpacer(4)
-    text(row, pending ? '待更新' : `${Math.round(100 * (1 - window.percent))}%`, Font.semiboldMonospacedSystemFont(10))
-    if (!pending) bar(widget, width, 3.7, 1 - window.percent, false)
+    if (expired) {
+      text(row, '已过期', Font.mediumSystemFont(8), palette.secondary)
+      row.addSpacer(4)
+    }
+    text(row, `${Math.round(100 * (1 - window.percent))}%`, Font.semiboldMonospacedSystemFont(10), expired ? palette.secondary : palette.primary)
+    bar(widget, width, 3.7, 1 - window.percent, false)
   }
 }
 
@@ -643,7 +721,7 @@ function trendPanel(widget, usage, family, width, widgetHeight) {
   display.imageSize = new Size(chartWidth, height + axisHeight)
 }
 
-function vinylWidget(card, data, status, now, family, art) {
+function vinylWidget(card, data, updatedAt, status, now, family, art) {
   const widget = new ListWidget()
   widget.setPadding(inset, inset, inset, inset)
   widget.spacing = 0
@@ -675,7 +753,10 @@ function vinylWidget(card, data, status, now, family, art) {
   }
 
   const header = slot(content, 0, 18)
-  text(header, {today:'今日用量', trend:'7 天趋势', quota:'套餐额度'}[card],
+  const pastUsage = card !== 'quota' && data && data.day !== calendarKey(now)
+  const title = pastUsage ? (card === 'today' ? '用量 ' : '趋势截至 ') + data.day.slice(5)
+    : {today:'今日用量', trend:'7 天趋势', quota:'套餐额度'}[card]
+  text(header, title,
     Font.boldSystemFont(family === 'large' ? 14 : 11), palette.accent)
   header.addSpacer()
   if (card === 'quota') {
@@ -716,22 +797,18 @@ function vinylWidget(card, data, status, now, family, art) {
   content.addSpacer()
   const foot = slot(content, 0, 13)
   const prefix = status === '显示缓存' ? '上次同步' : '上次刷新'
-  const stale = data && now - Date.parse(data.updatedAt) > 20 * 60 * 1000
-  text(foot, `${prefix} ${updatedTime(data?.updatedAt, now)}${stale ? ' · 待更新' : ''}`,
+  const stale = updatedAt && now - Date.parse(updatedAt) > 20 * 60 * 1000
+  text(foot, `${prefix} ${updatedTime(updatedAt, now)}${stale ? ' · 待更新' : ''}`,
     Font.mediumSystemFont(8.5), palette.secondary)
   return widget
 }
 
 const card = settings?.card ?? 'quota'
-const now = Date.now()
 const family = config.runsInWidget ? config.widgetFamily : card === 'quota' ? 'large' : 'small'
-let { data, status } = await loadData(card)
-if (card !== 'quota' && data && data.day !== calendarKey(now)) {
-  data = null
-  status = '等待新一日用量同步'
-}
+const { data, updatedAt, status } = await loadData(card)
 const art = card === 'today' ? await readVinyl(data) : null
-const widget = vinylWidget(card, data, status, now, family, art)
+const now = Date.now()
+const widget = vinylWidget(card, data, updatedAt, status, now, family, art)
 if (config.runsInWidget) Script.setWidget(widget)
 else if (family === 'large') await widget.presentLarge()
 else await widget.presentSmall()

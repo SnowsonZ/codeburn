@@ -34,7 +34,7 @@ function isDate(value) {
 }
 
 function calendarDay(value) {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && isDate(value)
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && isoDate(value)?.slice(0, 10) === value
 }
 
 function isoDate(value) {
@@ -51,7 +51,8 @@ function quotaFields(quota) {
       stale: row?.stale === true,
       windows: windows.slice(0, id === 'antigravity' ? 24 : 2).filter(window =>
         typeof window?.label === 'string' && window.label.length <= 120 &&
-        Number.isFinite(window.percent) && window.percent >= 0 && window.percent <= 1
+        Number.isFinite(window.percent) && window.percent >= 0 && window.percent <= 1 &&
+        (window.resetsAt === null || isDate(window.resetsAt))
       ).map(({ label, percent, resetsAt }) => ({ label, percent, resetsAt: isoDate(resetsAt) })),
     }
   })
@@ -74,6 +75,30 @@ function usageFields(usage) {
   return { version: 1, updatedAt: isoDate(usage.updatedAt), day: usage.day, agents, days }
 }
 
+// The top-level timestamp is a complete-commit marker. Legacy payloads can
+// still be decoded, but neither a pair of matching block times nor a partial
+// snapshot is evidence of a complete refresh.
+function committedSnapshot(snapshot) {
+  const updatedAt = isoDate(snapshot?.updatedAt)
+  if (!updatedAt || snapshot.usage?.updatedAt !== snapshot.updatedAt ||
+      snapshot.quota?.updatedAt !== snapshot.updatedAt) return null
+  const usage = usageFields(snapshot.usage)
+  const quota = quotaFields(snapshot.quota)
+  if (!usage || !quota || !agentIds.every(id =>
+    snapshot.usage.agents.filter(row => row?.id === id).length === 1 &&
+    snapshot.quota.agents.filter(row => row?.id === id).length === 1
+  ) || snapshot.usage.agents.length !== agentIds.length ||
+      snapshot.quota.agents.length !== agentIds.length ||
+      usage.agents.some(row => row.tokens === null || row.input === null || row.cached === null ||
+        row.cached > row.input || row.input > row.tokens) ||
+      quota.agents.some(row => row.stale || row.windows.length === 0 ||
+        row.windows.length !== new Set(row.windows.map(window => window.label)).size ||
+        row.windows.length !== snapshot.quota.agents.find(agent => agent.id === row.id).windows?.length) ||
+      snapshot.usage.days.length !== 7 || usage.days.length !== 7 || new Set(usage.days.map(row => row.day)).size !== 7 ||
+      usage.days.at(-1)?.day !== usage.day || usage.days.some(row => row.tokens === null)) return null
+  return { version: 1, updatedAt, usage, quota }
+}
+
 export function quotaServer(accessKey, file = snapshotPath) {
   if (!/^[a-f0-9]{64}$/.test(accessKey)) throw new Error('Invalid widget access key')
   const authorization = Buffer.from(`Bearer ${accessKey}`)
@@ -89,7 +114,7 @@ export function quotaServer(accessKey, file = snapshotPath) {
     const route = request.url
     const frame = route?.match(/^\/codeburn-vinyl\/(light|dark|walnut)-(\d{1,2})\.png$/)
     const frameValid = frame && Number(frame[2]) >= 2 && Number(frame[2]) <= 36
-    if (route !== '/codeburn-quota' && route !== '/codeburn-usage' && !frameValid) {
+    if (!['/codeburn-quota', '/codeburn-usage', '/codeburn-snapshot'].includes(route) && !frameValid) {
       return send(404, { error: 'not_found' })
     }
     if (request.method !== 'GET') return send(405, { error: 'method_not_allowed' })
@@ -106,9 +131,11 @@ export function quotaServer(accessKey, file = snapshotPath) {
       })
       return response.end(png)
     }
-    const snapshot = await readSnapshot(file).catch(() => null)
-    const body = route === '/codeburn-quota' ? quotaFields(snapshot?.quota) : usageFields(snapshot?.usage)
-    if (!body) return send(503, { error: route === '/codeburn-quota' ? 'quota_unavailable' : 'usage_unavailable' })
+    const snapshot = committedSnapshot(await readSnapshot(file).catch(() => null))
+    const body = route === '/codeburn-snapshot' ? snapshot
+      : route === '/codeburn-quota' ? snapshot?.quota : snapshot?.usage
+    if (!body) return send(503, { error: route === '/codeburn-quota' ? 'quota_unavailable'
+      : route === '/codeburn-usage' ? 'usage_unavailable' : 'snapshot_unavailable' })
     send(200, body)
   })
 }

@@ -12,7 +12,8 @@ import { getQuota, quotaService } from './quota'
 import { Telemetry } from './telemetry'
 import { autoUpdateSupported, createAutoUpdateChecker, releaseFeedOverride, type AutoUpdateChecker } from './auto-update'
 import { createCompanionUpdater, type CompanionUpdater, type CompanionUpdateStatus } from './companion-update'
-import { startWidgetSnapshots } from './widget-snapshot'
+import { reportWidgetDiagnostic, startWidgetSnapshots, type WidgetDiagnostic } from './widget-snapshot'
+import { createWidgetQuotaReader } from './quota/widget-refresh'
 import { createUpdateChecker, type UpdateChecker, type UpdateStatus } from './updates'
 
 // Initialized in bootstrap() once Electron paths exist; stays null under tests.
@@ -360,8 +361,16 @@ function bootstrap(): void {
     reapOrphanServe(servePidFile)
     startServe(servePidFile)
     const widget = path.join(process.resourcesPath, '..', 'PlugIns', 'CodeBurnWidgets.appex')
-    if (process.platform === 'darwin' && app.isPackaged && existsSync(widget)) {
-      app.once('will-quit', startWidgetSnapshots(app.getPath('home'), spawnCli, getQuota))
+    const diagnostic: WidgetDiagnostic | undefined = process.env.CODEBURN_WIDGET_DIAGNOSTICS === '1'
+      ? reason => { console.error(JSON.stringify(reason)) }
+      : undefined
+    if (process.platform !== 'darwin' || !app.isPackaged) {
+      reportWidgetDiagnostic(diagnostic, { stage: 'startup', result: 'unsupported' })
+    } else if (!existsSync(widget)) {
+      reportWidgetDiagnostic(diagnostic, { stage: 'startup', result: 'extension_missing' })
+    } else {
+      app.once('will-quit', startWidgetSnapshots(app.getPath('home'), spawnCli,
+        createWidgetQuotaReader({ diagnostic }), { diagnostic }))
     }
     // Consent-gated anonymous telemetry (desktop only). Nothing transmits until
     // the onboarding consent screen is completed and the toggle is on; EU/EEA/

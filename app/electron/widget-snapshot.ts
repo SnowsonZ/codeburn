@@ -1,16 +1,14 @@
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
 
-import type { spawnCli } from './cli'
-import type { getQuota } from './quota'
 import { atomicWriteSecureFile, readSecureFile } from './quota/security'
 import type { QuotaProvider, QuotaWindow } from './quota/types'
 
 export const WIDGET_EXTENSION_ID = 'local.codeburn.bigmodel.widgets'
 export const WIDGET_AGENTS = ['codex', 'zcode', 'antigravity'] as const
-const OTHER_QUOTA_PROVIDERS = ['claude', 'gemini', 'copilot', 'kimi', 'grokbot']
 const PROBE_INTERVAL_MS = 30_000
 const SNAPSHOT_INTERVAL_MS = 5 * 60_000
+const ROUND_TIMEOUT_MS = 15 * 60_000
 const MAX_SNAPSHOT_BYTES = 32 * 1024
 
 type Agent = typeof WIDGET_AGENTS[number]
@@ -26,7 +24,35 @@ type WidgetQuota = {
   updatedAt: string
   agents: Array<{ id: Agent; windows: QuotaWindow[]; stale?: true }>
 }
-type WidgetSnapshot = { version: 1; usage: WidgetUsage | null; quota: WidgetQuota | null }
+type WidgetSnapshot = { version: 1; updatedAt: string; usage: WidgetUsage; quota: WidgetQuota }
+type UsageReader = (args: string[], options: { priority: 'background'; signal: AbortSignal }) => Promise<unknown>
+type QuotaReader = (signal: AbortSignal) => Promise<QuotaProvider[]>
+type DiagnosticReason =
+  | { stage: 'startup'; result: 'started' | 'unsupported' | 'extension_missing' }
+  | { stage: 'container'; result: 'ready' | 'unavailable' }
+  | { stage: 'usage'; result: 'failed' | 'incomplete'; provider: Agent }
+  | { stage: 'round'; result: 'deadline' | 'payload_too_large' }
+  | { stage: 'fence'; result: 'stale' }
+  | { stage: 'quota'; result: 'deadline' | 'invalid_providers' }
+  | { stage: 'quota'; result: 'started' | 'backoff' | 'in_flight' | 'fresh' | 'disconnected' | 'not_fresh' |
+        'failed' | 'no_usable_windows' | 'invalid_windows' | 'validation_collision'; provider: Agent }
+  | { stage: 'write'; result: 'success' | 'failed' }
+const DIAGNOSTIC_ERRNOS = ['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM', 'EEXIST', 'EISDIR', 'ENOSPC', 'EROFS', 'EIO'] as const
+type DiagnosticErrno = typeof DIAGNOSTIC_ERRNOS[number]
+export type WidgetDiagnostic = (reason: DiagnosticReason & { errno?: DiagnosticErrno }) => void | Promise<void>
+
+export function reportWidgetDiagnostic(sink: WidgetDiagnostic | undefined, reason: DiagnosticReason, error?: unknown): void {
+  if (!sink) return
+  let errno: DiagnosticErrno | undefined
+  try {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code
+    errno = DIAGNOSTIC_ERRNOS.find(value => value === code)
+  } catch { /* A hostile error accessor supplies no errno. */ }
+  try {
+    const completion = sink(errno ? { ...reason, errno } : reason)
+    if (completion) void completion.catch(() => {})
+  } catch { /* Diagnostics must never fail a widget round. */ }
+}
 
 function object(value: unknown): ObjectFields | null {
   return value !== null && typeof value === 'object' ? value as ObjectFields : null
@@ -50,7 +76,10 @@ function reportDays(report: unknown): Map<string, ObjectFields> | null {
   const days = new Map<string, ObjectFields>()
   for (const entry of daily) {
     const row = object(entry)
-    if (row && typeof row.date === 'string') days.set(row.date, row)
+    if (!row || typeof row.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.date) ||
+      !Number.isFinite(Date.parse(row.date)) || new Date(row.date).toISOString().slice(0, 10) !== row.date ||
+      days.has(row.date)) return null
+    days.set(row.date, row)
   }
   return days
 }
@@ -64,7 +93,11 @@ function countsFor(row: ObjectFields | undefined): WidgetCounts {
     return { tokens: null, input: null, cached: null }
   }
   const input = inputTokens + cacheReadTokens + cacheWriteTokens
-  return { tokens: input + outputTokens, input, cached: cacheReadTokens }
+  const tokens = input + outputTokens
+  if (!Number.isSafeInteger(input) || !Number.isSafeInteger(tokens)) {
+    return { tokens: null, input: null, cached: null }
+  }
+  return { tokens, input, cached: cacheReadTokens }
 }
 
 export function makeWidgetUsage(reports: readonly unknown[], now: Date): WidgetUsage | null {
@@ -78,7 +111,8 @@ export function makeWidgetUsage(reports: readonly unknown[], now: Date): WidgetU
     agents: WIDGET_AGENTS.map((id, index) => ({ id, ...countsFor(maps[index]?.get(day)) })),
     days: weekDays(now).map(date => {
       const values = maps.map(map => countsFor(map?.get(date)).tokens)
-      return { day: date, tokens: values.some(value => value === null) ? null : values.reduce<number>((sum, value) => sum + (value ?? 0), 0) }
+      const total = values.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+      return { day: date, tokens: values.some(value => value === null) || !Number.isSafeInteger(total) ? null : total }
     }),
   }
 }
@@ -111,51 +145,197 @@ export function makeWidgetQuota(rows: readonly QuotaProvider[], now: Date, previ
   }
 }
 
-export function startWidgetSnapshots(home: string, readUsage: typeof spawnCli, readQuota: typeof getQuota): () => void {
+function completeQuota(rows: readonly QuotaProvider[], now: Date, diagnostic?: WidgetDiagnostic): WidgetQuota | null {
+  if (rows.length !== WIDGET_AGENTS.length) {
+    reportWidgetDiagnostic(diagnostic, { stage: 'quota', result: 'invalid_providers' })
+    return null
+  }
+  if (WIDGET_AGENTS.some(id => {
+    const matches = rows.filter(row => row?.provider === id)
+    if (matches.length !== 1) {
+      reportWidgetDiagnostic(diagnostic, { stage: 'quota', result: 'invalid_providers' })
+      return true
+    }
+    const row = matches[0]!
+    if (row.source === 'antigravity-cli' || row.connection !== 'connected' || row.rateLimited) {
+      const result = row.source === 'antigravity-cli' ? 'not_fresh' : row.rateLimited ? 'backoff' : row.connection === 'disconnected' ? 'disconnected' : 'not_fresh'
+      reportWidgetDiagnostic(diagnostic, { stage: 'quota', result, provider: id })
+      return true
+    }
+    if (!Array.isArray(row.details)) {
+      reportWidgetDiagnostic(diagnostic, { stage: 'quota', result: 'invalid_windows', provider: id })
+      return true
+    }
+    const windows = row.primary === null ? row.details : [row.primary, ...row.details]
+    if (windows.length === 0) {
+      reportWidgetDiagnostic(diagnostic, { stage: 'quota', result: 'no_usable_windows', provider: id })
+      return true
+    }
+    const byWireLabel = new Map<string, QuotaWindow>()
+    return windows.some(window => {
+      if (!window || typeof window.label !== 'string' || !window.label.trim() ||
+        !Number.isFinite(window.percent) || window.percent < 0 || window.percent > 1 ||
+        (window.resetsAt !== null && (typeof window.resetsAt !== 'string' || !Number.isFinite(Date.parse(window.resetsAt))))) {
+        reportWidgetDiagnostic(diagnostic, { stage: 'quota', result: 'invalid_windows', provider: id })
+        return true
+      }
+      const wireLabel = window.label.slice(0, 120)
+      const previous = byWireLabel.get(wireLabel)
+      byWireLabel.set(wireLabel, window)
+      // Providers commonly repeat the same window in primary and details.
+      // Accept that, but never commit two distinct windows that consumers will
+      // see under one truncated label (or inconsistent data for one label).
+      if (!wireLabel.trim()) {
+        reportWidgetDiagnostic(diagnostic, { stage: 'quota', result: 'invalid_windows', provider: id })
+        return true
+      }
+      const collision = Boolean(previous && (previous.label !== window.label ||
+        previous.percent !== window.percent || previous.resetsAt !== window.resetsAt))
+      if (collision) reportWidgetDiagnostic(diagnostic, { stage: 'quota', result: 'validation_collision', provider: id })
+      return collision
+    })
+  })) return null
+  return makeWidgetQuota(rows, now)
+}
+
+function recordedTime(value: unknown): number {
+  const row = object(value)
+  if (row?.version !== 1) return 0
+  return Math.max(0, ...[row.updatedAt, object(row.usage)?.updatedAt, object(row.quota)?.updatedAt]
+    .map(value => typeof value === 'string' ? Date.parse(value) : NaN).filter(Number.isFinite))
+}
+
+export function startWidgetSnapshots(home: string, readUsage: UsageReader, readQuota: QuotaReader,
+  options: { timeoutMs?: number; cadenceMs?: number; now?: () => Date; elapsed?: () => number; timeZone?: () => string; diagnostic?: WidgetDiagnostic } = {}): () => void {
   const container = path.join(home, 'Library', 'Containers', WIDGET_EXTENSION_ID, 'Data')
   const file = path.join(container, 'Library', 'Application Support', 'CodeBurn Widgets', 'snapshot.json')
-  let lastAttempt = 0
-  let running = false
+  const timeoutMs = options.timeoutMs ?? ROUND_TIMEOUT_MS
+  const cadenceMs = options.cadenceMs ?? SNAPSHOT_INTERVAL_MS
+  const now = options.now ?? (() => new Date())
+  const elapsed = options.elapsed ?? (() => performance.now())
+  const timeZone = options.timeZone ?? (() => Intl.DateTimeFormat().resolvedOptions().timeZone)
+  const diagnostic = options.diagnostic
+  let lastAttempt: number | null = null
+  let active: AbortController | null = null
   let stopped = false
 
   async function publish(): Promise<void> {
-    if (running || stopped || Date.now() - lastAttempt < SNAPSHOT_INTERVAL_MS) return
-    running = true
+    if (active || stopped || (lastAttempt !== null && elapsed() - lastAttempt < cadenceMs)) return
+    const controller = new AbortController()
+    const signal = controller.signal
+    active = controller
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+    let abortListener: (() => void) | undefined
+    let timedOut = false
     try {
-      // macOS owns the sandbox container. Until it exists there is no widget
-      // consumer, and the main app has no reason to fetch data or create it.
-      if (!await stat(container).then(info => info.isDirectory(), () => false)) return
-      lastAttempt = Date.now()
-      const before = new Date()
-      const [usageResult, quotaResult] = await Promise.allSettled([
-        Promise.all(WIDGET_AGENTS.map(id => readUsage(
-          ['status', '--format', 'menubar-json', '--period', 'week', '--provider', id, '--no-optimize', '--no-timeline'],
-          { priority: 'background' },
-        ))),
-        readQuota({ disabled: OTHER_QUOTA_PROVIDERS }),
+      const deadline = elapsed() + timeoutMs
+      const cancel = new Promise<never>((_, reject) => {
+        abortListener = () => reject(signal.reason)
+        signal.addEventListener('abort', abortListener, { once: true })
+        deadlineTimer = setTimeout(() => {
+          timedOut = true
+          controller.abort(new Error('Widget snapshot timed out'))
+        }, timeoutMs)
+        deadlineTimer.unref()
+      })
+      const isDirectory = await Promise.race([stat(container).then(info => info.isDirectory(), error => {
+        if (!signal.aborted) reportWidgetDiagnostic(diagnostic, { stage: 'container', result: 'unavailable' }, error)
+        return null
+      }), cancel])
+      if (stopped || isDirectory === null) return
+      if (!isDirectory) {
+        reportWidgetDiagnostic(diagnostic, { stage: 'container', result: 'unavailable' })
+        return
+      }
+      reportWidgetDiagnostic(diagnostic, { stage: 'container', result: 'ready' })
+      lastAttempt = elapsed()
+      const startedAt = now()
+      const day = dayKey(startedAt)
+      const zone = timeZone()
+      // Keep every read local to this attempt. A failed/expired attempt can never
+      // feed a newer attempt. Validate usage per provider to fail early on a bad report.
+      const [reports, quotaRows, previousTime] = await Promise.race([
+        Promise.all([
+          (async () => {
+            const reports: unknown[] = []
+            // Each CLI process is round-owned and cancellable. Read serially as
+            // with the former resident server so our own scans do not contend
+            // for the session-cache refresh lock and trigger stale fallback.
+            for (const id of WIDGET_AGENTS) {
+              signal.throwIfAborted()
+              let report: unknown
+              try {
+                report = await readUsage(
+                  ['status', '--format', 'menubar-json', '--period', 'week', '--provider', id, '--no-optimize', '--no-timeline'],
+                  { priority: 'background', signal },
+                )
+              } catch (error) {
+                if (!signal.aborted) reportWidgetDiagnostic(diagnostic, { stage: 'usage', result: 'failed', provider: id })
+                throw error
+              }
+              const days = reportDays(report)
+              if (!days || weekDays(startedAt).some(date => countsFor(days.get(date)).tokens === null)) {
+                if (!signal.aborted) reportWidgetDiagnostic(diagnostic, { stage: 'usage', result: 'incomplete', provider: id })
+                throw new Error('Incomplete widget usage')
+              }
+              reports.push(report)
+            }
+            return reports
+          })(),
+          Promise.resolve().then(() => readQuota(signal)).then(rows => {
+            if (!completeQuota(rows, startedAt, signal.aborted ? undefined : diagnostic)) throw new Error('Incomplete widget quota')
+            return rows
+          }),
+          readSecureFile(file, MAX_SNAPSHOT_BYTES).then(text => text ? recordedTime(JSON.parse(text)) : 0)
+            .catch(() => 0),
+        ] as const),
+        cancel,
       ])
-      if (stopped) return
-      const now = new Date()
-      const old = await readSecureFile(file, MAX_SNAPSHOT_BYTES).then(text => {
-        const value = text ? JSON.parse(text) as WidgetSnapshot : null
-        return value?.version === 1 ? value : null
-      }).catch(() => null)
-      const usage = dayKey(before) === dayKey(now) && usageResult.status === 'fulfilled'
-        ? makeWidgetUsage(usageResult.value, now) : null
-      const quota = quotaResult.status === 'fulfilled' ? makeWidgetQuota(quotaResult.value, now, old?.quota) : null
-      await atomicWriteSecureFile(file, JSON.stringify({
-        version: 1, usage: usage ?? old?.usage ?? null, quota: quota ?? old?.quota ?? null,
-      } satisfies WidgetSnapshot))
+      const commitAt = now()
+      let fenced = false
+      const assertCurrent = () => {
+        const current = now()
+        if (active !== controller || stopped || signal.aborted || (timedOut = elapsed() >= deadline) ||
+          timeZone() !== zone || dayKey(current) !== day || current.getTime() < commitAt.getTime()) {
+          fenced = true
+          if (!timedOut) reportWidgetDiagnostic(diagnostic, { stage: 'fence', result: 'stale' })
+          throw new Error('Obsolete widget snapshot')
+        }
+      }
+      assertCurrent()
+      if (commitAt.getTime() < startedAt.getTime() || commitAt.getTime() <= previousTime) {
+        reportWidgetDiagnostic(diagnostic, { stage: 'fence', result: 'stale' })
+        return
+      }
+      const usage = makeWidgetUsage(reports, commitAt)
+      const quota = completeQuota(quotaRows, commitAt, diagnostic)
+      if (!usage || !quota || usage.days.some(value => value.tokens === null)) return
+      const payload = JSON.stringify({ version: 1, updatedAt: commitAt.toISOString(), usage, quota } satisfies WidgetSnapshot)
+      if (Buffer.byteLength(payload) > MAX_SNAPSHOT_BYTES) {
+        reportWidgetDiagnostic(diagnostic, { stage: 'round', result: 'payload_too_large' })
+        return
+      }
+      try {
+        await atomicWriteSecureFile(file, payload, assertCurrent)
+        reportWidgetDiagnostic(diagnostic, { stage: 'write', result: 'success' })
+      } catch (error) {
+        if (!fenced) reportWidgetDiagnostic(diagnostic, { stage: 'write', result: 'failed' }, error)
+        throw error
+      }
     } catch {
-      // A widget may disappear, or macOS may withhold container access.
-      // Neither should interrupt CodeBurn or invalidate the last good snapshot.
+      if (timedOut) reportWidgetDiagnostic(diagnostic, { stage: 'round', result: 'deadline' })
+      // A rejected, incomplete or overdue attempt never replaces a prior snapshot.
     } finally {
-      running = false
+      if (deadlineTimer) clearTimeout(deadlineTimer)
+      if (abortListener) signal.removeEventListener('abort', abortListener)
+      controller.abort()
+      active = null
     }
   }
 
+  reportWidgetDiagnostic(diagnostic, { stage: 'startup', result: 'started' })
   void publish()
-  const timer = setInterval(() => { void publish() }, PROBE_INTERVAL_MS)
+  const timer = setInterval(() => { void publish() }, Math.min(PROBE_INTERVAL_MS, cadenceMs))
   timer.unref()
-  return () => { stopped = true; clearInterval(timer) }
+  return () => { stopped = true; clearInterval(timer); active?.abort() }
 }

@@ -233,9 +233,20 @@ function pumpSlots(): void {
 
 /** Resolve once a run slot is free. The per-call timeout starts only after this
  *  resolves (i.e. at real spawn time), never while queued. */
-function acquireSlot(priority: SpawnPriority): Promise<void> {
+function acquireSlot(priority: SpawnPriority, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    ;(priority === 'background' ? backgroundQueue : interactiveQueue).push({ resolve, reject })
+    signal?.throwIfAborted()
+    const queue = priority === 'background' ? backgroundQueue : interactiveQueue
+    function abort() {
+      const index = queue.indexOf(waiter)
+      if (index >= 0) { queue.splice(index, 1); waiter.reject(signal?.reason) }
+    }
+    const waiter: SlotWaiter = {
+      resolve: () => { signal?.removeEventListener('abort', abort); resolve() },
+      reject: error => { signal?.removeEventListener('abort', abort); reject(error) },
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+    queue.push(waiter)
     pumpSlots()
   })
 }
@@ -624,8 +635,9 @@ function withoutProgressLines(stderr: string): string {
   return stderr.split('\n').filter(line => !line.startsWith(PROGRESS_LINE_PREFIX)).join('\n').trim()
 }
 
-function runCli(spec: SpawnSpec, cmdLabel: string, timeoutMs: number, onStderr?: (chunk: string) => void): Promise<unknown> {
+function runCli(spec: SpawnSpec, cmdLabel: string, timeoutMs: number, onStderr?: (chunk: string) => void, signal?: AbortSignal): Promise<unknown> {
   return new Promise<unknown>((resolve, reject) => {
+    signal?.throwIfAborted()
     const child = spawn(spec.bin, spec.args, { stdio: ['ignore', 'pipe', 'pipe'], ...spawnOptionsFor(spec) })
     activeChildren.add(child)
     let stdout = ''
@@ -638,6 +650,7 @@ function runCli(spec: SpawnSpec, cmdLabel: string, timeoutMs: number, onStderr?:
       settled = true
       clearTimeout(idleTimer)
       clearTimeout(ceiling)
+      signal?.removeEventListener('abort', abort)
       activeChildren.delete(child)
       fn()
     }
@@ -657,6 +670,10 @@ function runCli(spec: SpawnSpec, cmdLabel: string, timeoutMs: number, onStderr?:
     }
     armIdle()
     const ceiling = setTimeout(() => expire(`codeburn ${cmdLabel} exceeded ${MAX_RUNTIME_MS}ms`), MAX_RUNTIME_MS)
+    function abort() {
+      finish(() => { killGracefully(child); reject(signal?.reason) })
+    }
+    signal?.addEventListener('abort', abort, { once: true })
 
     const bump = (n: number) => {
       // Buffered bytes can still land after the kill; re-arming then would leave
@@ -714,11 +731,12 @@ async function runScheduledCli(
   timeoutMs: number,
   priority: SpawnPriority,
   onStderr?: (chunk: string) => void,
+  signal?: AbortSignal,
 ): Promise<unknown> {
-  await acquireSlot(priority)
+  await acquireSlot(priority, signal)
   try {
     if (shuttingDown) throw new CliError('nonzero', 'codeburn is shutting down')
-    return await runCli(spec, cmdLabel, timeoutMs, onStderr)
+    return await runCli(spec, cmdLabel, timeoutMs, onStderr, signal)
   } finally {
     releaseSlot()
   }
@@ -789,7 +807,13 @@ class ServeClient {
   // so only a window nobody is looking at gives the child up.
   private readonly idleMs = Number(process.env.CODEBURN_SERVE_IDLE_MS ?? 900_000)
 
-  constructor(private readonly spec: SpawnSpec, private readonly pidFile?: string) {}
+  private readonly spec: SpawnSpec
+  private readonly pidFile?: string
+
+  constructor(spec: SpawnSpec, pidFile?: string) {
+    this.spec = spec
+    this.pidFile = pidFile
+  }
 
   isRunning(): boolean { return this.child !== null }
   disabled(): boolean { return this.deaths >= SERVE_MAX_RESTARTS }
@@ -1165,7 +1189,7 @@ function isServeCompatibleEnv(extraEnv?: NodeJS.ProcessEnv): boolean {
 
 export function spawnCli(
   args: string[],
-  opts: { timeoutMs?: number; onStderr?: (chunk: string) => void; extraEnv?: NodeJS.ProcessEnv; priority?: SpawnPriority } = {},
+  opts: { timeoutMs?: number; onStderr?: (chunk: string) => void; extraEnv?: NodeJS.ProcessEnv; priority?: SpawnPriority; signal?: AbortSignal } = {},
 ): Promise<unknown> {
   if (shuttingDown) return Promise.reject(new CliError('nonzero', 'codeburn is shutting down'))
   const target = resolveTarget()
@@ -1177,6 +1201,12 @@ export function spawnCli(
   spec.env = { ...spec.env, CODEBURN_PROGRESS: '1' }
   if (opts.extraEnv) spec.env = { ...spec.env, ...opts.extraEnv }
 
+  // A cancellable publication round must own its CLI child. It cannot join a
+  // prior round or kill the shared resident process on cancellation.
+  if (opts.signal) {
+    return runScheduledCli(spec, args[0] ?? '', opts.timeoutMs ?? DESKTOP_COLD_TIMEOUT_MS,
+      opts.priority ?? 'interactive', opts.onStderr, opts.signal)
+  }
   const generation = readGeneration
   const key = JSON.stringify([generation, spec.bin, ...spec.args])
   const existing = readInflight.get(key)

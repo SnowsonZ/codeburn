@@ -159,7 +159,7 @@ function tokenAfterKey(data: Buffer): string | null {
 
 /** `null` when no journal holds the login — the same state as never signed in;
  *  `''` when the newest write cleared it. Throws when that write is unreadable. */
-export async function zcodeAccessToken(deps: ZcodeDeps): Promise<string | null> {
+export async function zcodeAccessToken(deps: ZcodeDeps, signal?: AbortSignal): Promise<string | null> {
   let names: string[]
   try { names = await deps.readDir(deps.storageDir) } catch { return null }
   // Journal names are zero-padded counters, so descending name order is
@@ -167,6 +167,7 @@ export async function zcodeAccessToken(deps: ZcodeDeps): Promise<string | null> 
   // there (snappy-compressed, invisible to this scan) and it is deleted.
   const journals = names.filter(name => name.endsWith('.log')).sort().reverse()
   for (const name of journals) {
+    signal?.throwIfAborted()
     const data = await deps.readJournal(path.join(deps.storageDir, name))
     if (data === null) continue
     const token = tokenAfterKey(data)
@@ -263,10 +264,13 @@ export async function fetchZcodeQuota(options: Partial<ZcodeDeps> & {
   const deps = { ...defaultDeps(), ...options }
   let isBigModel = false
   try {
+    options.signal?.throwIfAborted()
     const bigModelKey = await options.readBigModelApiKey?.() ?? null
+    options.signal?.throwIfAborted()
     isBigModel = Boolean(bigModelKey)
     const rejectedFooter = isBigModel ? ['BigModel rejected the Coding Plan API key.'] : EXPIRED_FOOTER
-    const token = bigModelKey ?? await zcodeAccessToken(deps)
+    const token = bigModelKey ?? await zcodeAccessToken(deps, options.signal)
+    options.signal?.throwIfAborted()
     if (token === null) return { quota: empty('disconnected') }
     if (token === '') return { quota: empty('terminalFailure', EXPIRED_FOOTER) }
 
@@ -298,6 +302,7 @@ export async function fetchZcodeQuota(options: Partial<ZcodeDeps> & {
     if (decoded && isBigModel) decoded.footerLines = [BIGMODEL_SOURCE]
     return { quota: decoded ?? empty('transientFailure', parseFooter) }
   } catch (error) {
+    if (options.signal?.aborted) return { quota: empty('transientFailure') }
     if (isBigModel) console.warn('BigModel quota unavailable')
     else console.warn(`ZCode quota unavailable: ${sanitizeError(error)}`)
     return { quota: empty('transientFailure') }

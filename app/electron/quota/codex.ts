@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -346,7 +347,7 @@ function persistRotated(auth: AuthDoc, rotated: RotatedTokens, deps: CodexDeps):
   return merged
 }
 
-async function refresh(auth: AuthDoc, deps: CodexDeps): Promise<AuthDoc | null> {
+async function rotateCredential(auth: AuthDoc, deps: CodexDeps): Promise<AuthDoc | null> {
   const refreshToken = auth.tokens?.refresh_token
   if (!refreshToken) return null
   // Deliberately not the caller's abort signal, only this request's own
@@ -369,7 +370,29 @@ async function refresh(auth: AuthDoc, deps: CodexDeps): Promise<AuthDoc | null> 
   return merged?.tokens?.access_token ? merged : null
 }
 
+// A separate widget observation can overlap a desktop quota request. Share only
+// an already-started credential grant for the very same auth file and lineage,
+// never the usage response. A grant already submitted must finish persisting its
+// rotation even if the original widget round aborts. mergeBase still protects
+// against a different login/rotation written by another process.
+const credentialFlights = new Map<string, { lineage: string; result: Promise<AuthDoc | null> }>()
+
+function refresh(auth: AuthDoc, deps: CodexDeps, signal?: AbortSignal): Promise<AuthDoc | null> {
+  signal?.throwIfAborted()
+  const token = auth.tokens?.refresh_token
+  if (!token) return Promise.resolve(null)
+  const lineage = createHash('sha256').update(JSON.stringify([
+    token, auth.tokens?.account_id ?? '', idTokenSubject(auth.tokens?.id_token) ?? '',
+  ])).digest('hex')
+  const existing = credentialFlights.get(deps.authPath)
+  if (existing) return existing.lineage === lineage ? existing.result : Promise.resolve(null)
+  const result = rotateCredential(auth, deps).finally(() => { credentialFlights.delete(deps.authPath) })
+  credentialFlights.set(deps.authPath, { lineage, result })
+  return result
+}
+
 async function usage(auth: AuthDoc, deps: CodexDeps, signal?: AbortSignal): Promise<Response | null> {
+  signal?.throwIfAborted()
   const token = auth.tokens?.access_token
   if (!token) return null
   const headers: Record<string, string> = { Authorization: `Bearer ${token}`, Accept: 'application/json', 'User-Agent': 'CodeBurn' }
@@ -382,7 +405,9 @@ export type CodexResult = { quota: QuotaProvider; retryAfterSeconds?: number }
 export async function fetchCodexQuota(options: Partial<CodexDeps> & { signal?: AbortSignal; allowKeychain?: boolean } = {}): Promise<CodexResult> {
   const deps = { ...defaults, ...options }
   try {
+    options.signal?.throwIfAborted()
     const discovered = await discoverSource(deps, Boolean(options.allowKeychain))
+    options.signal?.throwIfAborted()
     if (discovered === 'accessDenied') return { quota: empty('accessDenied') }
     if (!discovered) return { quota: empty('disconnected') }
     const source = discovered
@@ -394,18 +419,20 @@ export async function fetchCodexQuota(options: Partial<CodexDeps> & { signal?: A
     if (source.writable) {
       const refreshedAt = typeof auth.last_refresh === 'string' ? Date.parse(auth.last_refresh) : NaN
       if (!Number.isFinite(refreshedAt) || deps.now() - refreshedAt > EIGHT_DAYS) {
-        const next = await refresh(auth, deps)
+        const next = await refresh(auth, deps, options.signal)
         if (next) auth = next
       }
     }
     let response = await usage(auth, deps, options.signal)
     if (!response) return { quota: empty('disconnected') }
     if (response.status === 401) {
+      options.signal?.throwIfAborted()
       const reread = await source.reread()
+      options.signal?.throwIfAborted()
       if (reread?.tokens?.access_token && reread.tokens.access_token !== auth.tokens?.access_token) {
         auth = reread
       } else if (source.writable) {
-        const next = await refresh(reread ?? auth, deps)
+        const next = await refresh(reread ?? auth, deps, options.signal)
         if (!next) return { quota: empty('transientFailure') }
         auth = next
       } else {
@@ -425,6 +452,7 @@ export async function fetchCodexQuota(options: Partial<CodexDeps> & { signal?: A
     if (!response.ok) return { quota: { ...empty(response.status >= 400 && response.status < 500 ? 'terminalFailure' : 'transientFailure'), ...(response.status === 401 || response.status === 403 ? { connectable: true } : {}) } }
     return { quota: decodeCodexUsage(await response.json()) }
   } catch (error) {
+    if (options.signal?.aborted) return { quota: empty('transientFailure') }
     console.warn(`Codex quota unavailable: ${sanitizeError(error)}`)
     return { quota: empty('transientFailure') }
   }

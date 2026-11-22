@@ -40,11 +40,12 @@ export type AntigravityDeps = {
   request: LocalRequestFn
   /// Which process listing to ask for. Injected so both branches are testable from either OS.
   platform: string
+  signal?: AbortSignal
 }
 
 const execFileAsync: ExecFileFn = promisify(execFile)
 
-function postLocal(port: number, tls: boolean, pathName: string, body: string, csrf?: string): Promise<{ status: number; text: string } | null> {
+function postLocal(port: number, tls: boolean, pathName: string, body: string, csrf?: string, signal?: AbortSignal): Promise<{ status: number; text: string } | null> {
   return new Promise(resolve => {
     const request = (tls ? https : http).request({
       host: '127.0.0.1',
@@ -58,6 +59,7 @@ function postLocal(port: number, tls: boolean, pathName: string, body: string, c
         ...(csrf ? { 'X-Codeium-Csrf-Token': csrf } : {}),
       },
       timeout: LOCAL_TIMEOUT_MS,
+      ...(signal ? { signal } : {}),
     }, response => {
       let text = ''
       response.setEncoding('utf8')
@@ -273,13 +275,28 @@ function parseJson(text: string): unknown {
 export async function fetchAntigravityQuota(deps: Partial<AntigravityDeps> = {}): Promise<QuotaProvider> {
   const resolved = { ...defaults, ...deps }
   try {
-    const candidates = await discoverCandidates(resolved)
+    const signal = resolved.signal
+    const checked: AntigravityDeps = signal ? {
+      ...resolved,
+      execFile: (file, args) => {
+        signal.throwIfAborted()
+        return deps.execFile ? deps.execFile(file, args) : promisify(execFile)(file, args, { signal })
+      },
+      request: (port, tls, route, body, csrf) => {
+        signal.throwIfAborted()
+        return deps.request ? deps.request(port, tls, route, body, csrf) : postLocal(port, tls, route, body, csrf, signal)
+      },
+    } : resolved
+    signal?.throwIfAborted()
+    const candidates = await discoverCandidates(checked)
     if (candidates.length === 0) return empty('disconnected')
     for (const candidate of candidates) {
-      const ports = await listeningPorts(resolved, candidate.pid)
+      signal?.throwIfAborted()
+      const ports = await listeningPorts(checked, candidate.pid)
       if (candidate.extPort !== undefined && !ports.includes(candidate.extPort)) ports.push(candidate.extPort)
       for (const port of ports) {
-        const found = await probePort(resolved, port, candidate.csrf)
+        const found = await probePort(checked, port, candidate.csrf)
+        signal?.throwIfAborted()
         if (found) {
           const windows = [...found.windows].sort((a, b) => b.percent - a.percent)
           return {
@@ -294,6 +311,7 @@ export async function fetchAntigravityQuota(deps: Partial<AntigravityDeps> = {})
     }
     return empty('disconnected')
   } catch (error) {
+    if (resolved.signal?.aborted) return empty('transientFailure')
     console.warn(`Antigravity quota unavailable: ${sanitizeError(error)}`)
     return empty('transientFailure')
   }

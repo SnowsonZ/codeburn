@@ -229,7 +229,7 @@ export function atomicWriteSecureFileSync(filePath: string, contents: string): v
   }
 }
 
-export async function atomicWriteSecureFile(filePath: string, contents: string): Promise<void> {
+export async function atomicWriteSecureFile(filePath: string, contents: string, beforeRename?: () => void): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 })
   const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`)
   const handle = await open(tempPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600)
@@ -244,6 +244,7 @@ export async function atomicWriteSecureFile(filePath: string, contents: string):
   await handle.close()
   await chmod(tempPath, 0o600)
   try {
+    beforeRename?.()
     await rename(tempPath, filePath)
   } catch (error) {
     await unlink(tempPath).catch(() => undefined)

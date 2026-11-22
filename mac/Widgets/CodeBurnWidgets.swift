@@ -125,6 +125,11 @@ private struct QuotaAgent: Decodable {
     let id: Agent
     let windows: [QuotaWindow]
     var stale: Bool? = nil
+
+    func preferredWindow(atCommit date: Date?) -> QuotaWindow? {
+        let atCommit = date.map { date in windows.filter { $0.isActive(at: date) } } ?? windows
+        return (id == .antigravity ? atCommit.min { $0.remaining < $1.remaining } : atCommit.first) ?? windows.first
+    }
 }
 
 private struct ModelQuotaRow: Identifiable {
@@ -165,18 +170,48 @@ private struct QuotaSnapshot: Decodable {
 
 private struct Snapshot: Decodable {
     let version: Int
+    // Optional for decoding pre-commit v1 files; their two block timestamps
+    // cannot prove that a refresh was complete.
+    let updatedAt: String?
     let usage: UsageSnapshot?
     let quota: QuotaSnapshot?
+
+    var isComplete: Bool {
+        guard version == 1, let updatedAt, parseDate(updatedAt) != nil,
+              let usage, let quota, usage.updatedAt == updatedAt, quota.updatedAt == updatedAt,
+              usage.agents.count == Agent.allCases.count,
+              quota.agents.count == Agent.allCases.count,
+              Set(usage.agents.map(\.id)) == Set(Agent.allCases),
+              Set(quota.agents.map(\.id)) == Set(Agent.allCases),
+              usage.days.count == 7, usage.days.last?.day == usage.day,
+              Set(usage.days.map(\.day)).count == 7 else { return false }
+        return usage.days.allSatisfy { row in
+            guard let date = parseDay(row.day), let tokens = row.tokens else { return false }
+            return dayKey(date) == row.day && tokens >= 0
+        } && usage.agents.allSatisfy { row in
+            guard let tokens = row.tokens, let input = row.input, let cached = row.cached else { return false }
+            return cached >= 0 && cached <= input && input <= tokens
+        } && quota.agents.allSatisfy { row in
+            row.stale != true && !row.windows.isEmpty && row.windows.count <= (row.id == .antigravity ? 24 : 2) &&
+                Set(row.windows.map(\.label)).count == row.windows.count && row.windows.allSatisfy { window in
+                    window.label.utf16.count <= 120 && window.percent.isFinite &&
+                        (0...1).contains(window.percent) && (window.resetsAt == nil || parseDate(window.resetsAt) != nil)
+                }
+        }
+    }
 
     static func load() -> Self? {
         guard let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
-        let file = directory.appending(path: "CodeBurn Widgets/snapshot.json")
+        return load(from: directory.appending(path: "CodeBurn Widgets/snapshot.json"))
+    }
+
+    static func load(from file: URL) -> Self? {
         guard let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 32 * 1024,
               let data = try? Data(contentsOf: file),
               let snapshot = try? JSONDecoder().decode(Self.self, from: data),
-              snapshot.version == 1 else { return nil }
+              snapshot.isComplete else { return nil }
         return snapshot
     }
 
@@ -207,7 +242,7 @@ private struct Snapshot: Decodable {
                 QuotaWindow(label: "Gemini Models · Weekly Limit Remaining", percent: 0.25, resetsAt: nil),
             ]),
         ]
-        return .init(version: 1, usage: .init(day: dayKey(now), updatedAt: updated, agents: agents, days: week),
+        return .init(version: 1, updatedAt: updated, usage: .init(day: dayKey(now), updatedAt: updated, agents: agents, days: week),
                      quota: .init(updatedAt: updated, agents: quotas))
     }
 }
@@ -378,6 +413,11 @@ private struct Entry: TimelineEntry {
     let date: Date
     let snapshot: Snapshot?
     var finish: VinylFinish = .system
+
+    var historicalUsageDay: String? {
+        guard let day = snapshot?.usage?.day, day != dayKey(date) else { return nil }
+        return day
+    }
 }
 
 private struct SnapshotProvider: TimelineProvider {
@@ -391,15 +431,25 @@ private struct SnapshotProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> Void) {
-        let now = Date()
         let snapshot = Snapshot.load()
+        completion(Self.timeline(now: Date(), snapshot: snapshot, finish: .load()))
+    }
+
+    static func timeline(now: Date, snapshot: Snapshot?, finish: VinylFinish) -> Timeline<Entry> {
+        let entry = Entry(date: now, snapshot: snapshot, finish: finish)
         let windows = snapshot?.quota?.agents.flatMap(\.windows) ?? []
         let waitingForQuota = windows.contains { !$0.isActive(at: now) }
-        let interval: TimeInterval = snapshot == nil || waitingForQuota ? 5 * 60 : 15 * 60
-        let midnight = civilCalendar.nextDate(after: now, matching: .init(hour: 0, minute: 0), matchingPolicy: .nextTime)
+        let waitingForUsage = snapshot == nil || entry.historicalUsageDay != nil
+        let interval: TimeInterval = waitingForUsage || waitingForQuota ? 5 * 60 : 15 * 60
+        let midnight = civilCalendar.dateInterval(of: .day, for: now)?.end
         let reset = windows.compactMap { parseDate($0.resetsAt) }.filter { $0 > now }.min()
         let next = min(now.addingTimeInterval(interval), midnight ?? .distantFuture, reset ?? .distantFuture)
-        completion(Timeline(entries: [.init(date: now, snapshot: snapshot, finish: .load())], policy: .after(next)))
+        var entries = [entry]
+        // WidgetKit can advance this entry even if it defers the reload request.
+        if let midnight, snapshot?.usage != nil, entry.historicalUsageDay == nil {
+            entries.append(.init(date: midnight, snapshot: snapshot, finish: finish))
+        }
+        return Timeline(entries: entries, policy: .after(next))
     }
 }
 
@@ -452,9 +502,13 @@ private struct WidgetCard: View {
     private var quotaIdentityWidth: CGFloat { large ? 43 : 33 }
     private var inset: CGFloat { wide ? 14 : 11 }
     private var updateAnimation: Animation? { reduceMotion ? nil : .easeOut(duration: 0.32) }
-    private var usage: UsageSnapshot? {
-        guard let snapshot = entry.snapshot?.usage, snapshot.day == dayKey(entry.date) else { return nil }
-        return snapshot
+    private var usage: UsageSnapshot? { entry.snapshot?.usage }
+
+    private var cardTitle: String {
+        guard card != .quota, let day = entry.historicalUsageDay else { return card.title }
+        let date = String(day.suffix(5))
+        return card == .today ? copy("用量 " + date, "Usage " + date)
+            : copy("趋势截至 " + date, "Trend to " + date)
     }
 
     var body: some View {
@@ -489,7 +543,7 @@ private struct WidgetCard: View {
 
     private var header: some View {
         HStack(spacing: 5) {
-            Text(card.title)
+            Text(cardTitle)
                 .font(.system(size: large ? 15 : 11.5, weight: .bold))
                 .foregroundStyle(finish.orange)
                 .lineLimit(1).layoutPriority(1)
@@ -535,10 +589,10 @@ private struct WidgetCard: View {
     private var panelContent: some View {
         switch card {
         case .today:
-            if let usage = entry.snapshot?.usage, usage.day == dayKey(entry.date) { today(usage) }
+            if let usage { today(usage) }
             else { empty(copy("打开 CodeBurn 同步", "Open CodeBurn to sync")) }
         case .trend:
-            if let usage = entry.snapshot?.usage, usage.day == dayKey(entry.date) { trend(usage) }
+            if let usage { trend(usage) }
             else { empty(copy("等待用量同步", "Waiting for usage")) }
         case .quota:
             if let quota = entry.snapshot?.quota { quotas(quota) }
@@ -554,8 +608,7 @@ private struct WidgetCard: View {
     }
 
     private var refreshTime: some View {
-        let raw = card == .quota ? entry.snapshot?.quota?.updatedAt : entry.snapshot?.usage?.updatedAt
-        let updated = parseDate(raw)
+        let updated = parseDate(entry.snapshot?.updatedAt)
         return HStack(spacing: 4) {
             Text(copy("上次刷新", "Updated"))
             if let updated {
@@ -563,6 +616,9 @@ private struct WidgetCard: View {
                     Text(updated, style: .time)
                 } else {
                     Text(updated, format: .dateTime.month(.defaultDigits).day().hour().minute())
+                }
+                if entry.date.timeIntervalSince(updated) > 20 * 60 {
+                    Text(copy("· 待更新", "· Pending"))
                 }
             } else {
                 Text("—")
@@ -772,10 +828,8 @@ private struct WidgetCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(quota.agents, id: \.id) { row in
                     if row.id != quota.agents.first?.id { Spacer(minLength: 2) }
-                    let windows = row.windows.filter { $0.isActive(at: entry.date) }
-                    let preferred = row.id == .antigravity ? windows.min { $0.remaining < $1.remaining } : windows.first
-                    if let window = preferred ?? row.windows.first {
-                        let active = window.isActive(at: entry.date)
+                    if let window = row.preferredWindow(atCommit: parseDate(quota.updatedAt)) {
+                        let expired = !window.isActive(at: entry.date)
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 4) {
                                 quotaSourceIcon(row)
@@ -792,14 +846,11 @@ private struct WidgetCard: View {
                                 } else {
                                     Text(window.name).font(.system(size: 9)).foregroundStyle(secondaryColor).lineLimit(1)
                                 }
-                                if active {
-                                    remainingValue(window)
-                                } else {
-                                    pendingQuotaValue(window.name)
-                                }
+                                if expired { expiredQuotaBadge }
+                                remainingValue(window, expired: expired)
                             }
                             .font(.system(size: 11.5, weight: .medium))
-                            if active { quotaBar(window) }
+                            quotaBar(window).opacity(expired ? 0.55 : 1)
                         }
                         .accessibilityElement(children: .combine)
                     } else {
@@ -1004,38 +1055,42 @@ private struct WidgetCard: View {
         }
     }
 
-    private func remainingValue(_ window: QuotaWindow) -> some View {
+    private func remainingValue(_ window: QuotaWindow, expired: Bool = false) -> some View {
         let rate = percent(window.remaining)
         return Text(rate)
             .monospacedDigit().lineLimit(1).fixedSize()
             .contentTransition(reduceMotion ? .identity : .numericText(value: window.remaining * 100))
             .animation(updateAnimation, value: window.remaining)
-            .accessibilityLabel(copy("剩余", "Remaining") + " " + rate)
+            .opacity(expired ? 0.65 : 1)
+            .accessibilityLabel(quotaAccessibilityTitle(window, expired: expired))
     }
 
-    private func pendingQuotaValue(_ label: String) -> some View {
-        Text(copy("待更新", "Pending"))
-            .font(.system(size: large ? 12 : 10, weight: .medium))
+    private var expiredQuotaBadge: some View {
+        Text(copy("已过期", "Expired"))
+            .font(.system(size: large ? 9 : 8, weight: .medium))
             .foregroundStyle(secondaryColor)
             .lineLimit(1)
-            .accessibilityLabel(label + " " + copy("已到重置时间，等待额度更新", "reset reached; waiting for updated quota"))
+            .fixedSize()
+    }
+
+    private func quotaAccessibilityTitle(_ window: QuotaWindow, expired: Bool) -> String {
+        (expired ? copy("已过期，历史剩余", "Expired, last known remaining") : copy("剩余", "Remaining"))
+            + " " + percent(window.remaining)
     }
 
     @ViewBuilder
     private func quotaCell(_ window: QuotaWindow?, metrics: QuotaGridMetrics, period: QuotaPeriod? = nil) -> some View {
-        if let window, window.isActive(at: entry.date) {
+        if let window {
+            let expired = !window.isActive(at: entry.date)
             HStack(spacing: large ? 7 : 4) {
-                cassette(window, height: metrics.barHeight)
-                remainingValue(window).frame(width: metrics.valueWidth, alignment: .trailing)
+                cassette(window, height: metrics.barHeight).opacity(expired ? 0.55 : 1)
+                if expired { expiredQuotaBadge }
+                remainingValue(window, expired: expired).frame(width: metrics.valueWidth, alignment: .trailing)
             }
             .font(.system(size: metrics.valueSize, weight: .semibold, design: .monospaced))
             .frame(height: metrics.rowHeight)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel((period?.title ?? window.name) + " " + copy("剩余", "Remaining") + " " + percent(window.remaining))
-        } else if let window {
-            pendingQuotaValue(period?.title ?? window.name)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .frame(height: metrics.rowHeight)
+            .accessibilityLabel((period?.title ?? window.name) + " " + quotaAccessibilityTitle(window, expired: expired))
         } else {
             Color.clear.frame(height: metrics.rowHeight)
                 .gridCellUnsizedAxes(.horizontal)

@@ -104,14 +104,22 @@ it('writes numerical snapshots using the widget’s own sandbox container', asyn
   const destination = path.join(container, 'Library', 'Application Support', 'CodeBurn Widgets', 'snapshot.json')
   await mkdir(container, { recursive: true })
   const readUsage = vi.fn(async (_args: string[]) => report())
-  const readQuota = vi.fn(async () => [])
+  const readQuota = vi.fn(async () => WIDGET_AGENTS.map(provider => ({
+    provider, connection: 'connected' as const,
+    primary: { label: 'Weekly', percent: 0, resetsAt: null }, details: [],
+    planLabel: null, footerLines: [],
+  })))
   const stop = startWidgetSnapshots(home, readUsage, readQuota)
   try {
     await vi.waitFor(async () => {
       const snapshot = JSON.parse(await readFile(destination, 'utf8'))
       expect(snapshot.version).toBe(1)
       expect(snapshot.usage.agents).toEqual(WIDGET_AGENTS.map(id => ({ id, tokens: 0, input: 0, cached: 0 })))
-      expect(snapshot.quota.agents).toEqual(WIDGET_AGENTS.map(id => ({ id, windows: [] })))
+      expect(snapshot.quota.agents).toEqual(WIDGET_AGENTS.map(id => ({
+        id, windows: [{ label: 'Weekly', percent: 0, resetsAt: null }],
+      })))
+      expect(snapshot.updatedAt).toBe(snapshot.usage.updatedAt)
+      expect(snapshot.updatedAt).toBe(snapshot.quota.updatedAt)
     })
     expect(readUsage.mock.calls.map(([args]) => args[args.indexOf('--provider') + 1])).toEqual(WIDGET_AGENTS)
     expect(readQuota).toHaveBeenCalledOnce()
