@@ -99,26 +99,35 @@ function icon(stack, name, size, fallback, color = palette.primary) {
   view.tintColor = color
 }
 
+const quotaProviderAxis = 11
+
 function identity(stack, row, height, width = railWidth, large = false) {
   const rail = slot(stack, width, height)
   rail.spacing = 0
   if (row.id) {
-    const size = Math.min(height - 1, row.id === 'zcode' ? 24 : 21)
-    rail.addSpacer(Math.max(1, (22 - size) / 2))
-    icon(rail, row.id, size, 'terminal')
+    const providerWidth = quotaProviderAxis * 2
+    const size = Math.min(height - 1, row.id === 'zcode' ? providerWidth : 21)
+    const provider = slot(rail, providerWidth, height)
+    provider.spacing = 0
+    const edge = quotaProviderAxis - size / 2
+    if (edge > 0) provider.addSpacer(edge)
+    icon(provider, row.id, size, 'terminal')
+    if (edge > 0) provider.addSpacer(edge)
+    const staleSize = row.stale ? Math.min(9, height - 2) : 0
     if (row.stale) {
       rail.addSpacer(4)
-      icon(rail, null, Math.min(9, height - 2), 'clock.arrow.circlepath', palette.secondary)
+      icon(rail, null, staleSize, 'clock.arrow.circlepath', palette.secondary)
     }
-    rail.addSpacer()
+    const available = width - providerWidth - (row.stale ? 4 + staleSize : 0)
+    if (available > 0) rail.addSpacer(available)
     return
   }
 
   // A single glyph and a pair occupy the same width so Scriptable cannot
   // recenter one row differently and move the tree line with it.
-  const inset = 6
   const guideWidth = 1
   const gap = 3
+  const inset = quotaProviderAxis - guideWidth / 2
   rail.addSpacer(inset)
   slot(rail, guideWidth, height).backgroundColor = palette.rule
   rail.addSpacer(gap)
@@ -300,7 +309,7 @@ function quotaRows(agents, capacity) {
 }
 
 function quotaTable(widget, quota, now, width, tableBudget, large) {
-  const identityWidth = large ? 43 : 33
+  const identityWidth = large ? 48 : 38
   const gapWidth = large ? 10 : 7
   const column = Math.floor((width - identityWidth - 2 * gapWidth) / 2)
   const span = column * 2 + gapWidth

@@ -492,8 +492,9 @@ private struct WidgetCard: View {
     private var secondaryColor: Color { finish.subtitle }
     private var ruleColor: Color { finish.ink.opacity(finish.light ? 0.16 : 0.18) }
     private var quotaIconSize: CGFloat { large ? 17 : 12 }
-    private let quotaIconGap: CGFloat = 4
-    private var quotaIdentityWidth: CGFloat { large ? 43 : 33 }
+    private let quotaProviderAxis: CGFloat = 11
+    private let quotaIconGap: CGFloat = 3
+    private var quotaIdentityWidth: CGFloat { large ? 48 : 38 }
     private var quotaValueGap: CGFloat { large ? 7 : 4 }
     private var inset: CGFloat { wide ? 14 : 11 }
     private var updateAnimation: Animation? { reduceMotion ? nil : .easeOut(duration: 0.32) }
@@ -971,6 +972,7 @@ private struct WidgetCard: View {
     private func quotaSourceIcon(_ agent: QuotaAgent, size: CGFloat? = nil) -> some View {
         HStack(spacing: 4) {
             quotaLogo("provider-" + agent.id.rawValue, fallback: "terminal", size: size ?? quotaIconSize)
+                .frame(width: quotaProviderAxis * 2)
                 .accessibilityLabel(agent.id.name)
                 .help(agent.id.name)
             if agent.stale == true {
@@ -987,11 +989,11 @@ private struct WidgetCard: View {
 
     private func modelQuotaIconCell(_ group: String, height: CGFloat) -> some View {
         quotaIconCell(
-            HStack(spacing: 4) {
+            HStack(spacing: quotaIconGap) {
                 Rectangle().fill(ruleColor).frame(width: 1, height: height).accessibilityHidden(true)
                 modelIcon(group, size: min(quotaIconSize - 2, max(7, height - 2)))
             }
-            .padding(.leading, 6), height: height)
+            .padding(.leading, quotaProviderAxis - 0.5), height: height)
     }
 
     private func periodLabel(_ period: QuotaPeriod) -> some View {

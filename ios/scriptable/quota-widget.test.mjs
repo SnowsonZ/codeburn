@@ -103,8 +103,8 @@ test('Antigravity groups recognize the same full period suffixes as Mac', () => 
   assert.equal(rows[2].label, undefined)
 })
 
-test('each Antigravity model row reserves the same two icon slots', () => {
-  const source = script.slice(script.indexOf('function identity('), script.indexOf('function accountRows('))
+test('Antigravity model guides share the provider icon center and use two fixed slots', () => {
+  const source = script.slice(script.indexOf('const quotaProviderAxis'), script.indexOf('function accountRows('))
   const identity = runInNewContext(source + '; identity', {
     palette: {},
     Font: { semiboldMonospacedSystemFont: size => size },
@@ -116,12 +116,21 @@ test('each Antigravity model row reserves the same two icon slots', () => {
     icon(parent, name, size) { parent.children.push({ name, width: size }) },
     text(parent, value) { parent.children.push({ value }) },
   })
-  for (const [width, height, large, size] of [[33, 14, false, 10], [43, 23, true, 15]]) {
+  for (const [width, height, large, size] of [[38, 14, false, 10], [48, 23, true, 15]]) {
+    for (const [id, rowHeight] of [['codex', height], ['zcode', height], ['antigravity', 9]]) {
+      const root = { children: [] }
+      identity(root, { id }, rowHeight, width, large)
+      const [provider] = root.children[0].children
+      const index = provider.children.findIndex(glyph => glyph.name === id)
+      const leading = provider.children.slice(0, index).reduce((sum, child) => sum + child.width, 0)
+      assert.equal(leading + provider.children[index].width / 2, 11)
+    }
     for (const group of ['Claude and GPT models', 'Gemini models', 'Gemini 4 Argon']) {
       const root = { children: [] }
       identity(root, { group }, height, width, large)
       const [rail] = root.children
-      assert.deepEqual(rail.children.map(child => child.width), [6, 1, 3, size, 3, size])
+      assert.deepEqual(rail.children.map(child => child.width), [10.5, 1, 3, size, 3, size, 0.5])
+      assert.equal(rail.children[0].width + rail.children[1].width / 2, 11)
       assert.equal(rail.children[1].height, height)
       assert.equal(rail.children[3].children[0].width, size)
     }
