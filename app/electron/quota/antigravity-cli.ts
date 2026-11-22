@@ -89,7 +89,12 @@ export async function trustedAntigravityCli(home: string, uid: number): Promise<
 async function installedExecutable(): Promise<string | null> {
   if (process.platform !== 'darwin') return null
   const { homedir, uid } = userInfo()
-  return trustedAntigravityCli(homedir, uid)
+  try {
+    return await trustedAntigravityCli(homedir, uid)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
 }
 
 type Run = (file: string, args: string[], signal: AbortSignal) => Promise<string>
@@ -146,17 +151,19 @@ type Options = { executable: () => Promise<string | null>; run: Run; timeoutMs: 
 
 export function createAntigravityCliReader({
   executable = installedExecutable, run = runCli, timeoutMs = ATTEMPT_TIMEOUT_MS,
-}: Partial<Options> = {}): (signal?: AbortSignal) => Promise<QuotaWindow[]> {
+}: Partial<Options> = {}): (signal?: AbortSignal) => Promise<QuotaWindow[] | null> {
   let inFlight = false
   return async parent => {
-    if (inFlight || parent?.aborted) return []
+    // An empty array means the supported CLI is absent. A pending or failed
+    // read is retryable and says nothing about whether the user is signed in.
+    if (inFlight || parent?.aborted) return null
     inFlight = true
     const deadline = new AbortController()
     const timer = setTimeout(() => deadline.abort(), timeoutMs)
     const signal = parent ? AbortSignal.any([parent, deadline.signal]) : deadline.signal
     let cancel!: () => void
-    const cancelled = new Promise<QuotaWindow[]>(resolve => {
-      cancel = () => resolve([])
+    const cancelled = new Promise<null>(resolve => {
+      cancel = () => resolve(null)
       if (signal.aborted) cancel()
       else signal.addEventListener('abort', cancel, { once: true })
     })
@@ -168,10 +175,11 @@ export function createAntigravityCliReader({
         signal.throwIfAborted()
         const output = await run(file, [...USAGE_ARGS], signal)
         signal.throwIfAborted()
-        if (Buffer.byteLength(output) > MAX_OUTPUT_BYTES) return []
-        return decodeAntigravityCliUsage(JSON.parse(output))
+        if (Buffer.byteLength(output) > MAX_OUTPUT_BYTES) return null
+        const windows = decodeAntigravityCliUsage(JSON.parse(output))
+        return windows.length > 0 ? windows : null
       } catch {
-        return []
+        return null
       } finally {
         // Keep admission closed until a cancelled process has actually exited.
         inFlight = false
@@ -179,7 +187,7 @@ export function createAntigravityCliReader({
     })()
     try {
       const windows = await Promise.race([attempt, cancelled])
-      return signal.aborted ? [] : windows
+      return signal.aborted ? null : windows
     } finally {
       clearTimeout(timer)
       signal.removeEventListener('abort', cancel)

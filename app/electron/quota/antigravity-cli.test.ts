@@ -103,6 +103,31 @@ describe('official Antigravity CLI output', () => {
 })
 
 describe('desktop Antigravity fallback', () => {
+  it('shows a retryable status while a widget owns the CLI and recovers on the next read', async () => {
+    let enter!: () => void
+    let finish!: (text: string) => void
+    const entered = new Promise<void>(resolve => { enter = resolve })
+    const cli = createAntigravityCliReader({
+      executable: async () => agy,
+      run: async (_file, args) => {
+        if (args[0] === '--version') return '1.5.14'
+        enter()
+        return new Promise(resolve => { finish = resolve })
+      },
+    })
+    const widget = cli()
+    await entered
+    const busy = await fetchAntigravityQuotaWithCli({ ...direct, cli })
+    finish(stdout)
+    await widget
+    expect(busy.connection).toBe('transientFailure')
+    const previousFinish = finish
+    const retry = fetchAntigravityQuotaWithCli({ ...direct, cli })
+    await vi.waitFor(() => expect(finish).not.toBe(previousFinish))
+    finish(stdout)
+    expect((await retry).connection).toBe('connected')
+  })
+
   it('prefers usable CSRF-protected legacy windows and recovers on discovery failure', async () => {
     const request = vi.fn(async () => ({
       status: 200,
@@ -157,7 +182,7 @@ describe('desktop Antigravity fallback', () => {
       return child as unknown as ReturnType<typeof spawn>
     })
     const cli = createAntigravityCliReader({ executable: async () => agy })
-    expect(await cli()).toEqual([])
+    expect(await cli()).toBeNull()
     expect(mockSpawn.mock.calls.map(([file, args]) => [file, args])).toEqual([
       [agy, ['--version']],
       [agy, hardenedArgs],
@@ -198,8 +223,8 @@ describe('desktop Antigravity fallback', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(run).toHaveBeenCalledTimes(2)
     await vi.advanceTimersByTimeAsync(25)
-    expect(await first).toEqual([])
-    expect(await cli()).toEqual([])
+    expect(await first).toBeNull()
+    expect(await cli()).toBeNull()
     expect(run).toHaveBeenCalledTimes(2)
     finish(stdout)
     await vi.advanceTimersByTimeAsync(0)
@@ -223,7 +248,7 @@ describe('desktop Antigravity fallback', () => {
     expect(warn).not.toHaveBeenCalled()
     const oversized = createAntigravityCliReader({ executable: async () => agy,
       run: async (_file, args) => args[0] === '--version' ? '1.5.14' : stdout + ' '.repeat(1024 * 1024) })
-    expect((await fetchAntigravityQuotaWithCli({ ...direct, cli: oversized })).connection).toBe('disconnected')
+    expect((await fetchAntigravityQuotaWithCli({ ...direct, cli: oversized })).connection).toBe('transientFailure')
   })
 
   it('kills a child when cancellation lands before the spawn listener is registered', async () => {
@@ -243,7 +268,7 @@ describe('desktop Antigravity fallback', () => {
       return child as unknown as ReturnType<typeof spawn>
     })
     const cli = createAntigravityCliReader({ executable: async () => agy })
-    expect(await cli(parent.signal)).toEqual([])
+    expect(await cli(parent.signal)).toBeNull()
     expect(mockSpawn).toHaveBeenCalledTimes(2)
     expect(kill).toHaveBeenCalledExactlyOnceWith('SIGKILL')
   })

@@ -293,7 +293,7 @@ test('widget retries Antigravity with a new official command and commits all thr
     output = response
     reasons.length = 0
     const stop = start(reader)
-    await until(() => sawAntigravity('disconnected'))
+    await until(() => sawAntigravity('not_fresh'))
     stop()
     assert.equal(await f.bytes(), oldBytes)
   }
@@ -353,7 +353,7 @@ test('widget keeps old bytes while the CLI is busy and after a cancelled command
   const expectBusy = async () => {
     reasons.length = 0
     const stop = start()
-    await until(() => reasons.some(event => event.stage === 'quota' && event.provider === 'antigravity' && event.result === 'disconnected'))
+    await until(() => reasons.some(event => event.stage === 'quota' && event.provider === 'antigravity' && event.result === 'not_fresh'))
     stop()
     assert.equal(await f.bytes(), baseline)
   }

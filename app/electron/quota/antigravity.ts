@@ -328,7 +328,7 @@ export async function fetchAntigravityQuotaWithCli(
   const direct = await fetchAntigravityQuota(deps)
   if (direct.connection === 'connected' || deps.signal?.aborted) return direct
   const windows = await cli(deps.signal)
-  if (deps.signal?.aborted) return empty('transientFailure')
+  if (windows === null || deps.signal?.aborted) return empty('transientFailure')
   if (!windows.length) return direct
   const details = [...windows].sort((a, b) => b.percent - a.percent)
   return {
