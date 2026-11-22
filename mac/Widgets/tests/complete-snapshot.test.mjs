@@ -17,6 +17,11 @@ test('Swift widget reads committed snapshots and schedules civil-day rollover', 
 @main
 struct SnapshotValidationTest {
     static func main() throws {
+        precondition(VinylFinish.system.resolved(for: .dark) == .walnut)
+        precondition(VinylFinish.system.resolved(for: .light) == .silver)
+        precondition(VinylFinish.dark.resolved(for: .dark) == .dark)
+        precondition(VinylFinish.walnut.resolved(for: .light) == .walnut)
+
         let timestamp = "2026-11-20T16:00:00.000Z"
         let ids = ["codex", "zcode", "antigravity"]
         let day = "2026-11-20"

@@ -335,6 +335,11 @@ private enum Card: String {
 private enum VinylFinish: String {
     case silver, dark, walnut, system
 
+    func resolved(for colorScheme: ColorScheme) -> Self {
+        guard self == .system else { return self }
+        return colorScheme == .dark ? .walnut : .silver
+    }
+
     static func load() -> Self {
         guard let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return .system
@@ -494,7 +499,7 @@ private struct WidgetCard: View {
 
     private var wide: Bool { family != .systemSmall }
     private var large: Bool { family == .systemLarge }
-    private var finish: VinylFinish { entry.finish == .system ? (colorScheme == .dark ? .dark : .silver) : entry.finish }
+    private var finish: VinylFinish { entry.finish.resolved(for: colorScheme) }
     private var secondaryColor: Color { finish.subtitle }
     private var ruleColor: Color { finish.ink.opacity(finish.light ? 0.16 : 0.18) }
     private var quotaIconSize: CGFloat { large ? 17 : 12 }
