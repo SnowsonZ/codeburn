@@ -101,6 +101,7 @@ function icon(stack, name, size, fallback, color = palette.primary) {
 
 function identity(stack, row, height, width = railWidth, large = false) {
   const rail = slot(stack, width, height)
+  rail.spacing = 0
   if (row.id) {
     const size = Math.min(height - 1, row.id === 'zcode' ? 24 : 21)
     rail.addSpacer(Math.max(1, (22 - size) / 2))
@@ -109,30 +110,40 @@ function identity(stack, row, height, width = railWidth, large = false) {
       rail.addSpacer(4)
       icon(rail, null, Math.min(9, height - 2), 'clock.arrow.circlepath', palette.secondary)
     }
-  } else {
-    rail.addSpacer(6)
-    slot(rail, 1, height).backgroundColor = palette.rule
-    rail.addSpacer(3)
-    const name = row.group.toLowerCase()
-    const claude = name.includes('claude')
-    const gpt = name.includes('gpt')
-    const gemini = name.includes('gemini')
-    const model = claude ? 'claude' : gpt ? 'codex' : gemini ? 'gemini' : null
-    const size = Math.min(large ? 15 : 10, Math.max(7, height - 2))
-    icon(rail, model, size, claude ? 'sun.max' : gpt ? 'circle.hexagongrid' : gemini ? 'sparkle' : 'cpu')
-    if (claude && gpt) {
-      rail.addSpacer(3)
-      icon(rail, 'codex', size, 'circle.hexagongrid')
-    } else if (gemini && name.includes('argon')) {
-      rail.addSpacer(3)
-      const badge = slot(rail, size, Math.min(height - 2, 13))
-      badge.cornerRadius = 3
-      badge.backgroundColor = palette.badge
-      badge.addSpacer(2)
-      text(badge, 'Ar', Font.semiboldMonospacedSystemFont(Math.min(8, size * 0.7)), palette.secondary)
-    }
+    rail.addSpacer()
+    return
   }
-  rail.addSpacer()
+
+  // A single glyph and a pair occupy the same width so Scriptable cannot
+  // recenter one row differently and move the tree line with it.
+  const inset = 6
+  const guideWidth = 1
+  const gap = 3
+  rail.addSpacer(inset)
+  slot(rail, guideWidth, height).backgroundColor = palette.rule
+  rail.addSpacer(gap)
+  const name = row.group.toLowerCase()
+  const claude = name.includes('claude')
+  const gpt = name.includes('gpt')
+  const gemini = name.includes('gemini')
+  const model = claude ? 'claude' : gpt ? 'codex' : gemini ? 'gemini' : null
+  const size = Math.min(large ? 15 : 10, Math.max(7, height - 2))
+  icon(slot(rail, size, height), model, size, claude ? 'sun.max' : gpt ? 'circle.hexagongrid' : gemini ? 'sparkle' : 'cpu')
+  rail.addSpacer(gap)
+  const extra = slot(rail, size, height)
+  if (claude && gpt) {
+    icon(extra, 'codex', size, 'circle.hexagongrid')
+  } else if (gemini && name.includes('argon')) {
+    const badge = slot(extra, size, Math.min(height - 2, 13))
+    badge.cornerRadius = 3
+    badge.backgroundColor = palette.badge
+    badge.addSpacer(2)
+    text(badge, 'Ar', Font.semiboldMonospacedSystemFont(Math.min(8, size * 0.7)), palette.secondary)
+  } else {
+    extra.addSpacer(size)
+  }
+  const available = width - (inset + guideWidth + 2 * gap + 2 * size)
+  if (available > 0) rail.addSpacer(available)
 }
 
 function accountRows(agent) {
