@@ -5,8 +5,9 @@ const settings = null // Replaced when exporting the configured script.
 const requestedFinish = String(args.widgetParameter ?? '').trim().toLowerCase()
 const fixedFinish = ['light', 'dark', 'walnut'].includes(requestedFinish) ? requestedFinish : null
 const automatic = !fixedFinish && config.runsInWidget
+const systemDarkFinish = 'walnut'
 // Device.isUsingDarkAppearance() is available in the Scriptable app, not on the Home Screen.
-const finish = fixedFinish ?? ((!config.runsInWidget && Device.isUsingDarkAppearance()) ? 'dark' : 'light')
+const finish = fixedFinish ?? ((!config.runsInWidget && Device.isUsingDarkAppearance()) ? systemDarkFinish : 'light')
 const light = finish === 'light'
 const walnut = finish === 'walnut'
 const chassisStops = {
@@ -31,7 +32,7 @@ const finishes = {
 const paint = Object.fromEntries(Object.entries(finishes[finish]).map(([role, hex]) => [role, new Color(hex)]))
 // Only native views resolve dynamic colors. Raster drawing uses a stable artwork palette.
 const palette = automatic ? Object.fromEntries(Object.keys(paint).map(role => [
-  role, Color.dynamic(paint[role], new Color(finishes.dark[role])),
+  role, Color.dynamic(paint[role], new Color(finishes[systemDarkFinish][role])),
 ])) : paint
 const agentIds = ['codex', 'zcode', 'antigravity']
 const agentColors = ['#06b6d4', '#4387fb', '#d946ef']
@@ -734,7 +735,7 @@ function vinylWidget(card, data, updatedAt, status, now, family, art) {
   if (automatic) {
     const gradient = new LinearGradient()
     gradient.colors = chassisStops.light.map((hex, index) => Color.dynamic(
-      rgb(hex), rgb(chassisStops.dark[index])))
+      rgb(hex), rgb(chassisStops[systemDarkFinish][index])))
     gradient.locations = [0, 0.56, 1]
     gradient.startPoint = new Point(0, 0)
     gradient.endPoint = new Point(0.7, 1)

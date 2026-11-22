@@ -5,6 +5,26 @@ import { test } from 'node:test'
 
 const script = await readFile(new URL('./quota-widget.js', import.meta.url), 'utf8')
 const functions = script.slice(script.indexOf('function knownCount('), script.indexOf('function sum('))
+
+test('system dark uses walnut in both the widget and its in-app preview', () => {
+  const styles = script.slice(script.indexOf('const requestedFinish'), script.indexOf('const agentIds'))
+  function colors(parameter, runsInWidget, systemDark) {
+    class Color {
+      constructor(hex) { this.hex = hex }
+      static dynamic(light, dark) { return { light, dark } }
+    }
+    return runInNewContext(styles + '; ({ finish, palette })', {
+      args: { widgetParameter: parameter }, config: { runsInWidget },
+      Device: { isUsingDarkAppearance: () => systemDark }, Color,
+    })
+  }
+  const widget = colors('', true, true)
+  assert.equal(widget.palette.surface.dark.hex, '#271a12')
+  assert.equal(widget.palette.surface.light.hex, '#ece8e0')
+  assert.equal(colors('', false, true).finish, 'walnut')
+  assert.equal(colors('', false, false).finish, 'light')
+  assert.equal(colors('dark', false, true).finish, 'dark')
+})
 const agentIds = ['codex', 'zcode', 'antigravity']
 const oldStamp = '2026-11-20T15:00:00.000Z'
 const newStamp = '2026-11-20T16:00:00.000Z'
