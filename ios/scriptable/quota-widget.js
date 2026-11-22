@@ -41,7 +41,6 @@ const coverColors = light ? ['#dcd4c8','#d2c9bc','#d9cdc0','#cfc4b4','#d7ccbe','
   : ['#837168','#716159','#998579','#a7917f','#7f6c62','#957f70']
 const inset = 11
 const railWidth = 42
-const columnGap = 8
 const refreshInterval = 15 * 60 * 1000
 
 // Medium width, small edge, large height, in portrait points.
@@ -100,8 +99,8 @@ function icon(stack, name, size, fallback, color = palette.primary) {
   view.tintColor = color
 }
 
-function identity(stack, row, height) {
-  const rail = slot(stack, railWidth, height)
+function identity(stack, row, height, width = railWidth, large = false) {
+  const rail = slot(stack, width, height)
   if (row.id) {
     const size = Math.min(height - 1, row.id === 'zcode' ? 24 : 21)
     rail.addSpacer(Math.max(1, (22 - size) / 2))
@@ -111,24 +110,26 @@ function identity(stack, row, height) {
       icon(rail, null, Math.min(9, height - 2), 'clock.arrow.circlepath', palette.secondary)
     }
   } else {
-    rail.addSpacer(7)
+    rail.addSpacer(6)
+    slot(rail, 1, height).backgroundColor = palette.rule
+    rail.addSpacer(3)
     const name = row.group.toLowerCase()
     const claude = name.includes('claude')
     const gpt = name.includes('gpt')
     const gemini = name.includes('gemini')
     const model = claude ? 'claude' : gpt ? 'codex' : gemini ? 'gemini' : null
-    const size = Math.min(height - 2, 16)
-    icon(rail, model, size, 'cpu')
+    const size = Math.min(large ? 15 : 10, Math.max(7, height - 2))
+    icon(rail, model, size, claude ? 'sun.max' : gpt ? 'circle.hexagongrid' : gemini ? 'sparkle' : 'cpu')
     if (claude && gpt) {
       rail.addSpacer(3)
       icon(rail, 'codex', size, 'circle.hexagongrid')
     } else if (gemini && name.includes('argon')) {
       rail.addSpacer(3)
-      const badge = slot(rail, 16, Math.min(height - 2, 13))
+      const badge = slot(rail, size, Math.min(height - 2, 13))
       badge.cornerRadius = 3
       badge.backgroundColor = palette.badge
       badge.addSpacer(2)
-      text(badge, 'Ar', Font.semiboldMonospacedSystemFont(Math.min(7.5, height - 3)), palette.secondary)
+      text(badge, 'Ar', Font.semiboldMonospacedSystemFont(Math.min(8, size * 0.7)), palette.secondary)
     }
   }
   rail.addSpacer()
@@ -148,10 +149,12 @@ function gravityRows(agent) {
   const groups = new Map()
   const rows = []
   for (const window of agent.windows) {
-    const [group, bucket = ''] = window.label.split(' · ', 2)
-    const period = /(?:five|5)[ -]hour/i.test(bucket) ? 'short' : /weekly/i.test(bucket) ? 'week' : null
+    const separator = window.label.indexOf(' · ')
+    const group = separator < 0 ? window.label : window.label.slice(0, separator)
+    const bucket = separator < 0 ? '' : window.label.slice(separator + 3).toLowerCase().replaceAll('-', ' ')
+    const period = /(?:five|5) hour/.test(bucket) ? 'short' : /weekly/.test(bucket) ? 'week' : null
     if (!period) {
-      rows.push({ group, single: window, label: group })
+      rows.push({ group, single: window })
       continue
     }
     if (!groups.has(group)) {
@@ -273,7 +276,9 @@ function rule(parent, width) {
 }
 
 function quotaRows(agents, capacity) {
-  const groups = agents.map(agent => agent.id === 'antigravity' ? gravityRows(agent) : accountRows(agent))
+  const groups = agents.filter(agent => agent.id !== 'antigravity').map(accountRows)
+  const antigravity = agents.find(agent => agent.id === 'antigravity')
+  if (antigravity) groups.push(gravityRows(antigravity))
   let extraRows = Math.max(0, capacity - groups.length)
   const rows = groups.slice(0, capacity).flatMap(group => {
     const extras = Math.min(extraRows, group.length - 1)
@@ -284,8 +289,10 @@ function quotaRows(agents, capacity) {
 }
 
 function quotaTable(widget, quota, now, width, tableBudget, large) {
-  const column = Math.floor((width - railWidth - 2 * columnGap) / 2)
-  const span = column * 2 + columnGap
+  const identityWidth = large ? 43 : 33
+  const gapWidth = large ? 10 : 7
+  const column = Math.floor((width - identityWidth - 2 * gapWidth) / 2)
+  const span = column * 2 + gapWidth
   const headerHeight = large ? 17 : 12
   const headerGap = large ? 4 : 3
   const rowBudget = tableBudget - headerHeight - headerGap
@@ -313,9 +320,9 @@ function quotaTable(widget, quota, now, width, tableBudget, large) {
   table.size = new Size(width, headerHeight + headerGap + dataRows * rowHeight +
     dividerCount * dividerHeight + gapsHeight)
   const headers = slot(table, width, headerHeight)
-  const identityHeading = slot(headers, railWidth, headerHeight)
-  if (hidden) text(identityHeading, `另 ${hidden} 条`, Font.mediumSystemFont(large ? 9.5 : 8), palette.secondary)
-  headers.addSpacer(columnGap)
+  const identityHeading = slot(headers, identityWidth, headerHeight)
+  if (hidden && !dividerCount) text(identityHeading, `+${hidden}`, Font.mediumSystemFont(9), palette.secondary)
+  headers.addSpacer(gapWidth)
   const periods = ['5 小时', '每周']
   const valueSpace = quotaValueWidth(valueSize) + quotaValueGap
   for (const title of periods) {
@@ -325,17 +332,24 @@ function quotaTable(widget, quota, now, width, tableBudget, large) {
     text(tapeHeading, title, Font.mediumSystemFont(large ? 11 : 9), palette.secondary)
     tapeHeading.addSpacer()
     heading.addSpacer(valueSpace)
-    if (title === periods[0]) headers.addSpacer(columnGap)
+    if (title === periods[0]) headers.addSpacer(gapWidth)
   }
   table.addSpacer(headerGap)
   for (const [index, row] of rows.entries()) {
     if (index > 0) table.addSpacer(gap)
     const height = row.rule ? dividerHeight : rowHeight
     const line = slot(table, width, height)
-    identity(line, row, height)
-    line.addSpacer(columnGap)
+    identity(line, row, height, identityWidth, large)
+    line.addSpacer(gapWidth)
     if (row.rule) {
-      rule(slot(line, span, height), span)
+      const divider = slot(line, span, height)
+      const moreWidth = hidden ? 26 : 0
+      rule(divider, span - moreWidth)
+      if (hidden) {
+        const more = slot(divider, moreWidth, height)
+        more.addSpacer()
+        text(more, `+${hidden}`, Font.mediumSystemFont(9), palette.secondary)
+      }
     } else if (row.message) {
       const message = slot(line, span, rowHeight)
       message.addSpacer()
@@ -344,7 +358,7 @@ function quotaTable(widget, quota, now, width, tableBudget, large) {
       quotaCell(line, span, rowHeight, valueSize, row.single, now, row.label)
     } else {
       quotaCell(line, column, rowHeight, valueSize, row.short, now)
-      line.addSpacer(columnGap)
+      line.addSpacer(gapWidth)
       quotaCell(line, column, rowHeight, valueSize, row.week, now)
     }
   }
@@ -725,14 +739,14 @@ function trendPanel(widget, usage, family, width, widgetHeight, mastheadHeight) 
 }
 
 function widgetStatus(card, data) {
-  if (card === 'quota') return '剩余'
+  if (card === 'quota') return { label: '剩余', unit: '' }
   if (!data) return null
   if (card === 'today') {
     const rate = hitRate(data)
-    return rate === null ? null : `Cache ${rate}%`
+    return rate === null ? null : { label: `Cache ${rate}%`, unit: '' }
   }
   const [value, unit] = tokenParts(Math.max(...data.days.map(day => day.tokens)))
-  return ['Max', value, unit].filter(Boolean).join(' ')
+  return { label: `Max ${value}`, unit }
 }
 
 function widgetMasthead(parent, card, title, status, family) {
@@ -754,42 +768,53 @@ function widgetMasthead(parent, card, title, status, family) {
     dot.cornerRadius = 2
     dot.backgroundColor = palette.accent
     header.addSpacer(4)
-    text(header, status, Font.mediumSystemFont(large ? 10 : 8.5), palette.secondary)
+    const caption = horizontal(header)
+    caption.bottomAlignContent()
+    text(caption, status.label, Font.mediumSystemFont(large ? 10 : 8.5), palette.secondary)
+    if (status.unit) {
+      caption.addSpacer(2)
+      const unit = horizontal(caption)
+      unit.setPadding(0, 0, 0.5, 0)
+      text(unit, status.unit, Font.mediumSystemFont(large ? 8 : 6.5), palette.secondary)
+    }
     if (card === 'quota') header.addSpacer(family === 'small' ? 6 : 10)
   }
   return mastheadHeight
 }
 
+function widgetSurface(widget, width, height, art, usage) {
+  widget.backgroundColor = palette.surface
+  if (!automatic) {
+    widget.setPadding(inset, inset, inset, inset)
+    widget.backgroundImage = chassis(width, height, art, usage)
+    return widget
+  }
+  const gradient = new LinearGradient()
+  gradient.colors = chassisStops.light.map((hex, index) => Color.dynamic(
+    rgb(hex), rgb(chassisStops[systemDarkFinish][index])))
+  gradient.locations = [0, 0.56, 1]
+  gradient.startPoint = new Point(0, 0)
+  gradient.endPoint = new Point(0.7, 1)
+  widget.backgroundGradient = gradient
+  // Draw the same grain over the dynamic gradient for every card. Only
+  // Today adds the record to that full-card transparent layer.
+  widget.setPadding(0, 0, 0, 0)
+  const content = widget.addStack()
+  content.layoutVertically()
+  content.spacing = 0
+  content.setPadding(inset, inset, inset, inset)
+  content.backgroundImage = chassis(width, height, art, usage, true)
+  return content
+}
+
 function vinylWidget(card, data, updatedAt, status, now, family, art) {
   const widget = new ListWidget()
-  widget.setPadding(inset, inset, inset, inset)
   widget.spacing = 0
   widget.refreshAfterDate = new Date(now + refreshInterval)
   widget.url = URLScheme.forRunningScript()
   const [width, height] = widgetSize(family)
   const contentWidth = width - 2 * inset
-  widget.backgroundColor = palette.surface
-  let content = widget
-  if (automatic) {
-    const gradient = new LinearGradient()
-    gradient.colors = chassisStops.light.map((hex, index) => Color.dynamic(
-      rgb(hex), rgb(chassisStops[systemDarkFinish][index])))
-    gradient.locations = [0, 0.56, 1]
-    gradient.startPoint = new Point(0, 0)
-    gradient.endPoint = new Point(0.7, 1)
-    widget.backgroundGradient = gradient
-    if (card === 'today' && art && data) {
-      // Keep the artwork behind the entire card, including the footer.
-      widget.setPadding(0, 0, 0, 0)
-      content = widget.addStack()
-      content.layoutVertically()
-      content.spacing = 0
-      content.setPadding(inset, inset, inset, inset)
-      content.backgroundImage = chassis(width, height, art, data, true)
-    }
-  } else {
-    widget.backgroundImage = chassis(width, height, card === 'today' ? art : null, data)
-  }
+  const content = widgetSurface(widget, width, height, card === 'today' ? art : null, data)
 
   const pastUsage = card !== 'quota' && data && data.day !== calendarKey(now)
   const title = pastUsage ? (card === 'today' ? '用量 ' : '趋势截至 ') + data.day.slice(5)

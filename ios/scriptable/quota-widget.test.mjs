@@ -6,13 +6,15 @@ import { test } from 'node:test'
 const script = await readFile(new URL('./quota-widget.js', import.meta.url), 'utf8')
 const functions = script.slice(script.indexOf('function knownCount('), script.indexOf('function sum('))
 
-test('status aligns with the two-line masthead and quota keeps an extra right inset', () => {
-  const titleCode = script.slice(script.indexOf('function widgetStatus('), script.indexOf('function vinylWidget('))
+test('status shares the two-line masthead and uses a smaller Max suffix', () => {
+  const titleCode = script.slice(script.indexOf('function widgetStatus('), script.indexOf('function widgetSurface('))
   const usageCode = script.slice(script.indexOf('function tokenParts('), script.indexOf('function calendarKey('))
   function stack(width, height) {
     return { children: [], width, height,
       addStack() { const child = stack(); this.children.push(child); return child },
       layoutVertically() { this.direction = 'vertical' },
+      bottomAlignContent() { this.baseline = 'bottom' },
+      setPadding() {},
       addSpacer(size) { this.children.push({ spacer: size }) },
     }
   }
@@ -25,33 +27,80 @@ test('status aligns with the two-line masthead and quota keeps an extra right in
       parent.children.push(row)
       return row
     },
-    text(row, value) { row.children.push(value); return {} },
+    horizontal: parent => parent.addStack(),
+    text(row, value, font) { const label = { value, font }; row.children.push(label); return label },
   })
   const stats = { agents: [{ input: 100, cached: 99 }],
     days: [0, 5_000_000, 2_560_000_000, 8, 4, 2, 300_000_000].map(tokens => ({ tokens })) }
   const cases = [
-    ['today', '今日用量', 'TURNTABLE', 'Cache 99%'],
-    ['quota', '套餐额度', 'DUAL CASSETTE DECK', '剩余'],
-    ['trend', '7 天趋势', 'LP CRATE', 'Max 2.56 B'],
+    ['today', '今日用量', 'TURNTABLE', 'Cache 99%', ''],
+    ['quota', '套餐额度', 'DUAL CASSETTE DECK', '剩余', ''],
+    ['trend', '7 天趋势', 'LP CRATE', 'Max 2.56', 'B'],
   ]
-  for (const [card, title, name, status] of cases) {
+  for (const [card, title, name, label, suffix] of cases) {
     const root = stack()
-    assert.equal(widgetStatus(card, stats), status)
+    const status = widgetStatus(card, stats)
+    assert.equal(status.label, label)
+    assert.equal(status.unit, suffix)
     assert.equal(widgetMasthead(root, card, title, status, 'medium'), 22)
     assert.equal(root.children.length, 1)
     const [row] = root.children
-    const [identity, flexible, dot, gap, label, tail] = row.children
+    const [identity, flexible, dot, gap, readout, tail] = row.children
     assert.equal(identity.direction, 'vertical')
-    assert.deepEqual(identity.children.flatMap(child => child.children), [title, name])
+    assert.deepEqual(identity.children.flatMap(child => child.children.map(text => text.value)), [title, name])
     assert.equal(flexible.spacer, undefined)
     assert.equal(dot.backgroundColor, 'orange')
     assert.equal(dot.cornerRadius, 2)
     assert.equal(gap.spacer, 4)
-    assert.equal(label, status)
+    assert.equal(readout.baseline, 'bottom')
+    assert.equal(readout.children[0].value, label)
+    if (suffix) {
+      const unit = readout.children[2].children[0]
+      assert.equal(unit.value, suffix)
+      assert(unit.font.size < readout.children[0].font.size)
+    }
     assert.equal(tail?.spacer, card === 'quota' ? 10 : undefined)
   }
   assert.equal(widgetStatus('trend', null), null)
-  assert.equal(widgetStatus('trend', { days: Array.from({ length: 7 }, () => ({ tokens: 0 })) }), 'Max 0')
+  assert.equal(widgetStatus('trend', { days: Array.from({ length: 7 }, () => ({ tokens: 0 })) }).label, 'Max 0')
+})
+
+test('automatic cards all put the same grain layer over the dynamic gradient', () => {
+  const source = script.slice(script.indexOf('function widgetSurface('), script.indexOf('function vinylWidget('))
+  const surface = runInNewContext(source + '; widgetSurface', {
+    automatic: true, palette: { surface: 'surface' }, inset: 11,
+    chassisStops: { light: [1, 2, 3], walnut: [4, 5, 6] }, systemDarkFinish: 'walnut',
+    LinearGradient: class {}, Point: class {}, Color: { dynamic: (...stops) => stops },
+    rgb: color => color,
+    chassis: (width, height, art, usage, transparent) => ({ width, height, art, transparent }),
+  })
+  for (const art of ['record', null, null]) {
+    const contents = { layoutVertically() {}, setPadding(...padding) { this.padding = padding } }
+    const widget = { setPadding(...padding) { this.padding = padding }, addStack: () => contents }
+    assert.equal(surface(widget, 152, 152, art, null), contents)
+    assert.equal(widget.backgroundGradient.colors.length, 3)
+    assert.deepEqual(widget.padding, [0, 0, 0, 0])
+    assert.deepEqual(contents.padding, [11, 11, 11, 11])
+    assert.equal(contents.backgroundImage.art, art)
+    assert.equal(contents.backgroundImage.transparent, true)
+  }
+})
+
+test('Antigravity groups recognize the same full period suffixes as Mac', () => {
+  const source = script.slice(script.indexOf('function gravityRows('), script.indexOf('function bar('))
+  const gravityRows = runInNewContext(source + '; gravityRows')
+  const week = { label: 'Gemini · Plan window · weekly', percent: 0.8 }
+  const short = { label: 'Gemini · Plan window · 5-hour', percent: 0.3 }
+  const standalone = { label: 'Claude · Custom period', percent: 0.2 }
+  const rows = gravityRows({ id: 'antigravity', windows: [week, standalone, short] })
+  assert.equal(rows.length, 3)
+  assert.equal(rows[0].rule, true)
+  assert.equal(rows[1].group, 'Gemini')
+  assert.equal(rows[1].week, week)
+  assert.equal(rows[1].short, short)
+  assert.equal(rows[2].group, 'Claude')
+  assert.equal(rows[2].single, standalone)
+  assert.equal(rows[2].label, undefined)
 })
 
 test('both usage totals share one baseline and use smaller plural Tokens', () => {

@@ -551,13 +551,20 @@ private struct WidgetCard: View {
             if let status = headerStatus {
                 HStack(spacing: 4) {
                     Circle().fill(finish.orange).frame(width: 4, height: 4).accessibilityHidden(true)
-                    Text(status)
-                        .monospacedDigit()
-                        .contentTransition(reduceMotion ? .identity : .numericText())
-                        .animation(updateAnimation, value: status)
-                        .accessibilityLabel(card == .today
-                            ? status.replacingOccurrences(of: "Cache", with: copy("缓存命中率", "Cache hit rate"))
-                            : status)
+                    HStack(alignment: .lastTextBaseline, spacing: 2) {
+                        Text(status.label)
+                            .monospacedDigit()
+                            .contentTransition(reduceMotion ? .identity : .numericText())
+                            .animation(updateAnimation, value: status.label)
+                        if !status.unit.isEmpty {
+                            Text(status.unit)
+                                .font(.system(size: large ? 8 : 6.5, weight: .medium))
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(card == .today
+                        ? status.label.replacingOccurrences(of: "Cache", with: copy("缓存命中率", "Cache hit rate"))
+                        : (status.unit.isEmpty ? status.label : status.label + " " + status.unit))
                 }
                 .font(.system(size: large ? 10.5 : 8.5, weight: .medium))
                 .foregroundStyle(secondaryColor)
@@ -580,11 +587,14 @@ private struct WidgetCard: View {
             .accessibilityHidden(true)
     }
 
-    private var headerStatus: String? {
+    private var headerStatus: (label: String, unit: String)? {
         switch card {
-        case .quota: copy("剩余", "Remaining")
-        case .today: usage?.cacheRate.map { "Cache " + percent($0) }
-        case .trend: usage?.days.compactMap(\.tokens).max().map { "Max " + compact($0) }
+        case .quota: (copy("剩余", "Remaining"), "")
+        case .today: usage?.cacheRate.map { ("Cache " + percent($0), "") }
+        case .trend: usage?.days.compactMap(\.tokens).max().map {
+            let parts = tokenParts($0)
+            return ("Max " + parts.number, parts.unit)
+        }
         }
     }
 
